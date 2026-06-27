@@ -136,6 +136,14 @@ tr.row:hover td{background:rgba(201,168,76,.05)}
 .img-slot img{width:100%;height:100%;object-fit:cover;position:absolute;inset:0}
 .img-slot-ico{font-size:28px;margin-bottom:4px}
 .img-slot-lbl{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:1px;color:var(--muted);text-align:center;z-index:1}
+.img-slot-btns{display:flex;gap:5px;flex-wrap:wrap;justify-content:center;margin-top:7px;position:relative}
+.islot-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;
+  padding:5px 9px;font-size:11px;font-family:'Cinzel',serif;letter-spacing:.5px;
+  background:rgba(196,160,58,.12);border:1px solid rgba(196,160,58,.3);
+  color:var(--gold);border-radius:5px;cursor:pointer;white-space:nowrap;transition:all .15s;
+  -webkit-tap-highlight-color:transparent;user-select:none}
+.islot-btn:hover,.islot-btn:active{background:rgba(196,160,58,.25)}
+.img-slot.has-img .img-slot-btns{margin-top:5px}
 .img-clr{display:none;position:absolute;top:5px;right:5px;width:24px;height:24px;border-radius:50%;background:rgba(0,0,0,.7);color:#fff;border:none;cursor:pointer;z-index:3;align-items:center;justify-content:center}
 .img-slot.has-img .img-clr{display:flex}
 /* MODAL */
@@ -332,11 +340,112 @@ tr.row:hover td{background:rgba(201,168,76,.05)}
   <div class="sec">
     <div class="sec-t">📸 Coin Images (stored in IndexedDB, linked by ID)</div>
     <div class="img-row">
-      <div class="img-slot" id="slot-obv" onclick="pickImg('obv')"><button class="img-clr" onclick="clearImg(event,'obv')">✕</button><div class="img-slot-ico">🔆</div><div class="img-slot-lbl">OBVERSE<br>(Front)</div></div>
-      <div class="img-slot" id="slot-rev" onclick="pickImg('rev')"><button class="img-clr" onclick="clearImg(event,'rev')">✕</button><div class="img-slot-ico">🔅</div><div class="img-slot-lbl">REVERSE<br>(Back)</div></div>
-      <div class="img-slot" id="slot-edge" onclick="pickImg('edge')"><button class="img-clr" onclick="clearImg(event,'edge')">✕</button><div class="img-slot-ico">🔘</div><div class="img-slot-lbl">EDGE / LABEL</div></div>
+      <div class="img-slot" id="slot-obv">
+        <button class="img-clr" onclick="clearImg(event,'obv')">✕</button>
+        <div class="img-slot-ico">🔆</div>
+        <div class="img-slot-lbl">OBVERSE<br>(Front)</div>
+        <div class="img-slot-btns" onclick="event.stopPropagation()">
+          <!-- label wraps input — synchronous gesture, works on iOS Safari -->
+          <label class="islot-btn" id="cam-lbl-obv">
+            📷 Camera
+            <input type="file" accept="image/*" capture="environment"
+              style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none"
+              onchange="handleImg(event,'obv')">
+          </label>
+          <button class="islot-btn" id="cam-btn-obv" style="display:none"
+            onclick="webcamOpen('obv')">📷 Camera</button>
+          <label class="islot-btn">
+            🖼 Library
+            <input type="file" accept="image/*"
+              style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none"
+              onchange="handleImg(event,'obv')">
+          </label>
+          <button class="islot-btn" onclick="webcamOpen('obv')">🎥 Webcam</button>
+        </div>
+      </div>
+      <div class="img-slot" id="slot-rev">
+        <button class="img-clr" onclick="clearImg(event,'rev')">✕</button>
+        <div class="img-slot-ico">🔅</div>
+        <div class="img-slot-lbl">REVERSE<br>(Back)</div>
+        <div class="img-slot-btns" onclick="event.stopPropagation()">
+          <label class="islot-btn" id="cam-lbl-rev">
+            📷 Camera
+            <input type="file" accept="image/*" capture="environment"
+              style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none"
+              onchange="handleImg(event,'rev')">
+          </label>
+          <button class="islot-btn" id="cam-btn-rev" style="display:none"
+            onclick="webcamOpen('rev')">📷 Camera</button>
+          <label class="islot-btn">
+            🖼 Library
+            <input type="file" accept="image/*"
+              style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none"
+              onchange="handleImg(event,'rev')">
+          </label>
+          <button class="islot-btn" onclick="webcamOpen('rev')">🎥 Webcam</button>
+        </div>
+      </div>
+      <div class="img-slot" id="slot-edge">
+        <button class="img-clr" onclick="clearImg(event,'edge')">✕</button>
+        <div class="img-slot-ico">🔘</div>
+        <div class="img-slot-lbl">EDGE / LABEL</div>
+        <div class="img-slot-btns" onclick="event.stopPropagation()">
+          <label class="islot-btn" id="cam-lbl-edge">
+            📷 Camera
+            <input type="file" accept="image/*" capture="environment"
+              style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none"
+              onchange="handleImg(event,'edge')">
+          </label>
+          <button class="islot-btn" id="cam-btn-edge" style="display:none"
+            onclick="webcamOpen('edge')">📷 Camera</button>
+          <label class="islot-btn">
+            🖼 Library
+            <input type="file" accept="image/*"
+              style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none"
+              onchange="handleImg(event,'edge')">
+          </label>
+          <button class="islot-btn" onclick="webcamOpen('edge')">🎥 Webcam</button>
+        </div>
+      </div>
     </div>
-    <input type="file" id="img-input" accept="image/*" capture="environment" style="display:none" onchange="handleImg(event)">
+    <!-- Hidden file inputs (triggered synchronously via label clicks) -->
+    <!-- img-slot-btns are injected by JS below each slot -->
+  </div>
+
+  <!-- Inline webcam panel for desktop camera capture + iPhone Continuity Camera -->
+  <div id="webcam-panel" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.88);align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:20px">
+    <!-- Camera selector -->
+    <div style="display:flex;align-items:center;gap:10px;width:100%;max-width:480px">
+      <label style="color:rgba(255,255,255,.6);font-size:13px;white-space:nowrap">📷 Camera:</label>
+      <select id="webcam-device-sel" onchange="webcamSwitchDevice()"
+        style="flex:1;background:#1a1a1a;color:#fff;border:1px solid rgba(196,160,58,.4);border-radius:6px;padding:7px 10px;font-size:14px;outline:none">
+        <option value="">Loading cameras…</option>
+      </select>
+    </div>
+    <!-- Video preview -->
+    <div style="position:relative;border-radius:12px;overflow:hidden;max-width:480px;width:100%;background:#000">
+      <video id="webcam-video" autoplay playsinline muted
+        style="width:100%;border-radius:12px;display:block;min-height:240px;background:#111"></video>
+      <div style="position:absolute;inset:0;border-radius:12px;border:2px solid rgba(196,160,58,.4);pointer-events:none"></div>
+    </div>
+    <!-- Controls -->
+    <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center">
+      <button onclick="webcamSnap()"
+        style="padding:14px 32px;background:linear-gradient(135deg,#8B6914,#C9A84C);color:#000;font-weight:700;font-size:16px;border:none;border-radius:10px;cursor:pointer;letter-spacing:1px">
+        📸 Snap Photo
+      </button>
+      <button onclick="webcamClose()"
+        style="padding:14px 24px;background:transparent;color:#ccc;font-size:15px;border:1px solid #555;border-radius:10px;cursor:pointer">
+        Cancel
+      </button>
+    </div>
+    <div id="webcam-status" style="color:rgba(255,255,255,.5);font-size:13px;font-family:monospace;text-align:center;max-width:440px"></div>
+    <!-- Continuity Camera tip -->
+    <div id="webcam-cc-tip" style="display:none;background:rgba(196,160,58,.1);border:1px solid rgba(196,160,58,.3);border-radius:8px;padding:10px 16px;max-width:440px;font-size:13px;color:rgba(255,255,255,.6);line-height:1.6;text-align:center">
+      📱 <strong style="color:rgba(196,160,58,.9)">iPhone detected via Continuity Camera</strong><br>
+      Keep your iPhone awake &amp; unlocked. Rear camera will activate automatically.
+    </div>
+    <canvas id="webcam-canvas" style="display:none"></canvas>
   </div>
 
   <div class="sec">
@@ -433,7 +542,7 @@ tr.row:hover td{background:rgba(201,168,76,.05)}
       <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
         <button class="btn btn-g" id="capBtn" onclick="captureScan()">📸 Capture & Read</button>
         <button class="btn btn-s" onclick="document.getElementById('scan-file').click()">🖼 Use Photo</button>
-        <input type="file" id="scan-file" accept="image/*" capture="environment" style="display:none" onchange="scanFromFile(event)">
+        <input type="file" id="scan-file" accept="image/*" style="display:none" onchange="scanFromFile(event)">
       </div>
     </div>
   </div>
@@ -486,6 +595,7 @@ document.addEventListener('DOMContentLoaded',init);
 
 /* ════════════ NAV ════════════ */
 function go(s){
+  initImgSlotButtons();
   document.querySelectorAll('.scr').forEach(x=>x.classList.remove('on'));
   document.getElementById('scr-'+s).classList.add('on');
   document.querySelectorAll('.ntab').forEach((t,i)=>t.classList.toggle('on',
@@ -872,8 +982,162 @@ function setSlot(s,data){
   if(data){if(!img){img=document.createElement('img');el.appendChild(img);}img.src=data;}
   else if(img)img.remove();
 }
-function pickImg(s){curSlot=s;document.getElementById('img-input').click();}
-function handleImg(e){const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>{compress(ev.target.result,1400,d=>{imgs[curSlot]=d;setSlot(curSlot,d);});};r.readAsDataURL(f);e.target.value='';}
+// handleImg — called directly by the inline label inputs (slot is passed as string)
+function handleImg(e, slot) {
+  const f = e.target.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = ev => {
+    compress(ev.target.result, 1400, d => {
+      imgs[slot] = d;
+      setSlot(slot, d);
+    });
+  };
+  r.readAsDataURL(f);
+  e.target.value = ''; // allow re-selecting same file
+}
+
+// ── Webcam — desktop / Mac / iPhone via Continuity Camera ──
+let webcamStream = null;
+
+// Detect mobile (iOS / Android) — used to show/hide buttons
+function isMobileDevice() {
+  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+// On page load: swap Camera button to webcamOpen on desktop
+function initImgSlotButtons() {
+  const isMobile = isMobileDevice();
+  ['obv','rev','edge'].forEach(slot => {
+    const lbl = document.getElementById('cam-lbl-' + slot);
+    const btn = document.getElementById('cam-btn-' + slot);
+    if (!lbl || !btn) return;
+    if (isMobile) {
+      // iOS/Android: use label→file input with capture= (synchronous, works)
+      lbl.style.display = '';
+      btn.style.display = 'none';
+    } else {
+      // Desktop/Mac: use getUserMedia (opens device selector incl. iPhone)
+      lbl.style.display = 'none';
+      btn.style.display = '';
+    }
+  });
+}
+
+// Enumerate all video input devices and populate selector
+async function webcamEnumerateDevices() {
+  const sel = document.getElementById('webcam-device-sel');
+  const tip = document.getElementById('webcam-cc-tip');
+  if (!sel) return null;
+
+  try {
+    // Must request permission first so device labels are available
+    const tempStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    tempStream.getTracks().forEach(t => t.stop());
+
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const videoDevices = devices.filter(d => d.kind === 'videoinput');
+
+    sel.innerHTML = videoDevices.map((d, i) =>
+      `<option value="${d.deviceId}">${d.label || 'Camera ' + (i + 1)}</option>`
+    ).join('');
+
+    // Check if iPhone is available (Continuity Camera shows as "iPhone Camera")
+    const hasIphone = videoDevices.some(d =>
+      /iphone|continuity/i.test(d.label)
+    );
+    if (tip) tip.style.display = hasIphone ? '' : 'none';
+
+    // Prefer iPhone if available (best quality for coins)
+    const iphoneDev = videoDevices.find(d => /iphone|continuity/i.test(d.label));
+    if (iphoneDev) sel.value = iphoneDev.deviceId;
+
+    return videoDevices.length ? (iphoneDev?.deviceId || videoDevices[0].deviceId) : null;
+  } catch(err) {
+    sel.innerHTML = '<option value="">⚠ No camera access</option>';
+    return null;
+  }
+}
+
+async function webcamOpen(slot) {
+  curSlot = slot;
+  const panel  = document.getElementById('webcam-panel');
+  const video  = document.getElementById('webcam-video');
+  const status = document.getElementById('webcam-status');
+  if (!panel || !video) return;
+
+  panel.style.display = 'flex';
+  if (status) status.textContent = 'Detecting cameras…';
+
+  const deviceId = await webcamEnumerateDevices();
+  await webcamStartDevice(deviceId, status);
+}
+
+async function webcamStartDevice(deviceId, statusEl) {
+  // Stop existing stream
+  if (webcamStream) {
+    webcamStream.getTracks().forEach(t => t.stop());
+    webcamStream = null;
+  }
+  const video = document.getElementById('webcam-video');
+  if (!video) return;
+
+  const constraints = {
+    audio: false,
+    video: deviceId
+      ? { deviceId: { exact: deviceId } }
+      : { facingMode: 'environment' }
+  };
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    webcamStream = stream;
+    video.srcObject = stream;
+    if (statusEl) statusEl.textContent = '';
+  } catch(err) {
+    if (statusEl) statusEl.textContent = '⚠ Camera error: ' + err.message;
+  }
+}
+
+async function webcamSwitchDevice() {
+  const sel    = document.getElementById('webcam-device-sel');
+  const status = document.getElementById('webcam-status');
+  const tip    = document.getElementById('webcam-cc-tip');
+  if (!sel) return;
+  const deviceId = sel.value;
+  const label    = sel.options[sel.selectedIndex]?.text || '';
+  const isIphone = /iphone|continuity/i.test(label);
+  if (tip) tip.style.display = isIphone ? '' : 'none';
+  if (status) status.textContent = 'Switching to ' + label + '…';
+  await webcamStartDevice(deviceId, status);
+}
+
+function webcamSnap() {
+  const video  = document.getElementById('webcam-video');
+  const canvas = document.getElementById('webcam-canvas');
+  if (!video || !canvas || !video.videoWidth) return;
+  canvas.width  = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.90);
+  compress(dataUrl, 1600, d => {
+    imgs[curSlot] = d;
+    setSlot(curSlot, d);
+  });
+  webcamClose();
+}
+
+function webcamClose() {
+  if (webcamStream) {
+    webcamStream.getTracks().forEach(t => t.stop());
+    webcamStream = null;
+  }
+  const panel = document.getElementById('webcam-panel');
+  const video = document.getElementById('webcam-video');
+  if (panel) panel.style.display = 'none';
+  if (video) video.srcObject = null;
+}
 function clearImg(e,s){e.stopPropagation();imgs[s]=null;setSlot(s,null);}
 function compress(dataUrl,maxW,cb){const img=new Image();img.onload=()=>{let{width:w,height:h}=img;if(w>maxW){h=h*maxW/w;w=maxW;}const cv=document.createElement('canvas');cv.width=w;cv.height=h;cv.getContext('2d').drawImage(img,0,0,w,h);cb(cv.toDataURL('image/jpeg',0.82));};img.src=dataUrl;}
 
