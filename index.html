@@ -204,6 +204,13 @@ tr.row.sel td{background:rgba(201,168,76,.12)}
  td,th{padding:7px 5px;font-size:13px}
  .dview-grid{grid-template-columns:1fr}
 }
+/* iOS visible-print: hide the print sheet on screen; in print, show ONLY it */
+#print-visible{display:none}
+body.printing-visible #print-visible{display:block}
+@media print{
+  body.printing-visible > *{display:none !important}
+  body.printing-visible #print-visible{display:block !important}
+}
 </style>
 </head>
 <body>
@@ -2218,7 +2225,54 @@ function printViaIframe(html){
     }catch(err){ reject(err); }
   });
 }
+/* iOS (incl. Home-Screen PWA) ignores printing a hidden iframe — after a printer
+   is chosen it renders the *visible* page, finds the 0×0 frame empty, and the
+   preview goes blank. So on iOS we print the visible document: stash the app,
+   drop the label sheet into a print container, print, then restore. */
+function isIOS(){
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+         (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1) ||  // iPadOS
+         (navigator.standalone===true);                                      // Home-Screen PWA
+}
+function printVisible(html){
+  return new Promise((resolve)=>{
+    // pull the <style> block(s) and the .sheet markup out of the built document
+    const styleMatch = html.match(/<style[\s\S]*?<\/style>/i);
+    const bodyMatch  = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    const styleHTML = styleMatch ? styleMatch[0] : '';
+    const sheetHTML = bodyMatch ? bodyMatch[1] : html;
+
+    const host = document.createElement('div');
+    host.id = 'print-visible';
+    host.innerHTML = styleHTML + sheetHTML;
+    document.body.appendChild(host);
+    document.body.classList.add('printing-visible');
+
+    let done=false;
+    const cleanup=()=>{ if(done)return; done=true;
+      document.body.classList.remove('printing-visible');
+      host.remove();
+      window.removeEventListener('afterprint', cleanup);
+      resolve();
+    };
+    window.addEventListener('afterprint', cleanup);
+
+    const fire=()=>{ try{ window.focus(); window.print(); }catch(e){}
+      // afterprint is unreliable in iOS PWAs — restore on next interaction too
+      const onTouch=()=>{ document.removeEventListener('touchend',onTouch); setTimeout(cleanup,300); };
+      document.addEventListener('touchend', onTouch, {once:true});
+      setTimeout(cleanup, 60000); // hard safety net
+    };
+    // wait for label images to load so they aren't blank on the sheet
+    const imgs=[...host.querySelectorAll('img')].filter(im=>!im.complete);
+    if(!imgs.length){ setTimeout(fire,80); return; }
+    let left=imgs.length; const tick=()=>{ if(--left<=0)fire(); };
+    imgs.forEach(im=>{ im.addEventListener('load',tick); im.addEventListener('error',tick); });
+    setTimeout(fire, 3000);
+  });
+}
 async function printHTML(html){
+  if(isIOS()){ await printVisible(html); return; }
   try{ await printViaIframe(html); }
   catch(e){ const w=window.open('','_blank'); if(!w){ popupHelp(); return; } w.document.write(html); w.document.close(); w.focus(); w.print(); }
 }
