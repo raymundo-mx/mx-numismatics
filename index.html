@@ -204,13 +204,6 @@ tr.row.sel td{background:rgba(201,168,76,.12)}
  td,th{padding:7px 5px;font-size:13px}
  .dview-grid{grid-template-columns:1fr}
 }
-/* iOS visible-print: hide the print sheet on screen; in print, show ONLY it */
-#print-visible{display:none}
-body.printing-visible #print-visible{display:block}
-@media print{
-  body.printing-visible > *{display:none !important}
-  body.printing-visible #print-visible{display:block !important}
-}
 </style>
 </head>
 <body>
@@ -2234,41 +2227,70 @@ function isIOS(){
          (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1) ||  // iPadOS
          (navigator.standalone===true);                                      // Home-Screen PWA
 }
+/* iOS-reliable print: render the label document inside a VISIBLE, full-screen
+   iframe (its own isolated document, own @page CSS — no conflict with the app's
+   styles). iOS renders and prints a visible iframe correctly, unlike a hidden
+   one. We print the iframe's own window, then remove the overlay. */
 function printVisible(html){
   return new Promise((resolve)=>{
-    // pull the <style> block(s) and the .sheet markup out of the built document
-    const styleMatch = html.match(/<style[\s\S]*?<\/style>/i);
-    const bodyMatch  = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-    const styleHTML = styleMatch ? styleMatch[0] : '';
-    const sheetHTML = bodyMatch ? bodyMatch[1] : html;
+    const old=document.getElementById('print-overlay'); if(old)old.remove();
+    const overlay=document.createElement('div');
+    overlay.id='print-overlay';
+    Object.assign(overlay.style,{position:'fixed',inset:'0',zIndex:'99999',background:'#fff'});
 
-    const host = document.createElement('div');
-    host.id = 'print-visible';
-    host.innerHTML = styleHTML + sheetHTML;
-    document.body.appendChild(host);
-    document.body.classList.add('printing-visible');
+    // a small toolbar so the user can trigger/cancel print on iOS, where an
+    // automatic window.print() inside an iframe is sometimes ignored
+    const bar=document.createElement('div');
+    bar.id='print-bar';
+    Object.assign(bar.style,{position:'fixed',top:'0',left:'0',right:'0',height:'52px',zIndex:'100000',
+      background:'#0d0d0f',color:'#c9a84c',display:'flex',alignItems:'center',justifyContent:'space-between',
+      padding:'0 14px',font:'600 15px/1 Arial,Helvetica,sans-serif',boxShadow:'0 1px 6px rgba(0,0,0,.4)'});
+    bar.innerHTML='<span>Label sheet ready</span>';
+    const btnWrap=document.createElement('div');
+    const printBtn=document.createElement('button');
+    printBtn.textContent='🖨 Print';
+    Object.assign(printBtn.style,{font:'700 15px Arial',background:'#c9a84c',color:'#0d0d0f',border:'0',
+      borderRadius:'7px',padding:'9px 16px',marginRight:'8px',cursor:'pointer'});
+    const closeBtn=document.createElement('button');
+    closeBtn.textContent='Close';
+    Object.assign(closeBtn.style,{font:'700 15px Arial',background:'transparent',color:'#c9a84c',
+      border:'1px solid #c9a84c',borderRadius:'7px',padding:'9px 16px',cursor:'pointer'});
+    btnWrap.appendChild(printBtn); btnWrap.appendChild(closeBtn);
+    bar.appendChild(btnWrap);
+
+    const iframe=document.createElement('iframe');
+    Object.assign(iframe.style,{position:'absolute',left:'0',top:'52px',width:'100%',
+      height:'calc(100% - 52px)',border:'0',background:'#fff'});
+
+    overlay.appendChild(bar);
+    overlay.appendChild(iframe);
+    document.body.appendChild(overlay);
+
+    const doc=iframe.contentWindow.document;
+    doc.open(); doc.write(html); doc.close();
 
     let done=false;
-    const cleanup=()=>{ if(done)return; done=true;
-      document.body.classList.remove('printing-visible');
-      host.remove();
-      window.removeEventListener('afterprint', cleanup);
-      resolve();
-    };
-    window.addEventListener('afterprint', cleanup);
+    const cleanup=()=>{ if(done)return; done=true; overlay.remove(); resolve(); };
+    closeBtn.addEventListener('click', cleanup);
 
-    const fire=()=>{ try{ window.focus(); window.print(); }catch(e){}
-      // afterprint is unreliable in iOS PWAs — restore on next interaction too
-      const onTouch=()=>{ document.removeEventListener('touchend',onTouch); setTimeout(cleanup,300); };
-      document.addEventListener('touchend', onTouch, {once:true});
-      setTimeout(cleanup, 60000); // hard safety net
+    const doPrint=()=>{
+      try{
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();   // print the iframe's OWN document (just the labels)
+      }catch(e){
+        try{ window.print(); }catch(_){}
+      }
     };
-    // wait for label images to load so they aren't blank on the sheet
-    const imgs=[...host.querySelectorAll('img')].filter(im=>!im.complete);
-    if(!imgs.length){ setTimeout(fire,80); return; }
-    let left=imgs.length; const tick=()=>{ if(--left<=0)fire(); };
-    imgs.forEach(im=>{ im.addEventListener('load',tick); im.addEventListener('error',tick); });
-    setTimeout(fire, 3000);
+    printBtn.addEventListener('click', doPrint);
+
+    // wait for label images, then try an automatic print; the toolbar remains as
+    // a manual fallback (and to reprint or close)
+    const imgs=[...doc.images].filter(im=>!im.complete);
+    const ready=()=>{ setTimeout(doPrint, 150); };
+    if(!imgs.length){ ready(); }
+    else{ let left=imgs.length; const tick=()=>{ if(--left<=0)ready(); };
+      imgs.forEach(im=>{ im.addEventListener('load',tick); im.addEventListener('error',tick); });
+      setTimeout(ready, 3000); }
   });
 }
 async function printHTML(html){
