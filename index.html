@@ -550,6 +550,13 @@ tr.row.sel td{background:rgba(201,168,76,.12)}
   </div>
 
   <div class="sec">
+    <div class="sec-t">📥 Import from PCGS Set Registry (CSV)</div>
+    <div class="hint" style="margin-bottom:12px">Import your PCGS "My Inventory" CSV export. NGC cert numbers found in comments are detected automatically, Sold/For Sale status is preserved, and each coin gets a new MX-# number. You'll see a preview before anything is saved. Photos are not in the CSV — add them per coin afterward.</div>
+    <button class="btn btn-s btn-g" onclick="document.getElementById('csv-inp').click()">📥 Import PCGS CSV</button>
+    <input type="file" id="csv-inp" accept=".csv,text/csv" style="display:none" onchange="importCSVFile(event)">
+  </div>
+
+  <div class="sec">
     <div class="sec-t">💾 Backup & Restore</div>
     <div class="hint" style="margin-bottom:12px">Exports all coins (with photos) into one .mxreg file you can save anywhere or move between devices.</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
@@ -568,6 +575,28 @@ tr.row.sel td{background:rgba(201,168,76,.12)}
     <div class="modal-c" style="border-top:1px solid var(--border);display:flex;gap:10px;justify-content:flex-end">
       <button class="btn btn-r btn-s" onclick="deleteCoin()">🗑 Delete</button>
       <button class="btn btn-s btn-g" onclick="editCoin()">✎ Edit</button>
+    </div>
+  </div>
+</div>
+
+<!-- PCGS CSV IMPORT MODAL -->
+<div class="modal" id="csvModal">
+  <div class="modal-box" style="max-width:960px;width:100%">
+    <div class="modal-h"><div class="stitle">Import Preview — PCGS CSV</div><button class="x" onclick="closeModal('csvModal')">×</button></div>
+    <div class="modal-c">
+      <div id="csv-summary" class="hint" style="margin-bottom:10px"></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+        <button class="btn btn-s" onclick="csvToggleAll(true)">☑ Select All</button>
+        <button class="btn btn-s" onclick="csvToggleAll(false)">☐ Select None</button>
+        <button class="btn btn-s" onclick="csvToggleDupes()">⇄ Toggle Duplicates</button>
+      </div>
+      <div style="max-height:52vh;overflow:auto;border:1px solid var(--border);border-radius:8px">
+        <table style="width:100%;border-collapse:collapse;font-size:12px" id="csv-table"></table>
+      </div>
+    </div>
+    <div class="modal-c" style="border-top:1px solid var(--border);display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-s" onclick="closeModal('csvModal')">Cancel</button>
+      <button class="btn btn-s btn-g" onclick="runCSVImport()" id="csv-import-btn">📥 Import Selected</button>
     </div>
   </div>
 </div>
@@ -1849,6 +1878,190 @@ function restoreDB(e){
     coins=await dbAll('coins');fillCertCoSelect();renderCertCoList();renderTable();renderDash();toast('Restored '+d.coins.length+' coins');
   }catch(err){toast('Restore failed: '+err.message);}};
   r.readAsText(f);e.target.value='';
+}
+
+/* ════════════ PCGS CSV IMPORT ════════════ */
+let csvPending=[];
+
+/* Dependency-free CSV parser: handles quoted fields, embedded newlines, "" escapes, CRLF, BOM */
+function parseCSVText(text){
+  if(text.charCodeAt(0)===0xFEFF)text=text.slice(1);
+  const rows=[];let row=[],field='',inQ=false;
+  for(let i=0;i<text.length;i++){
+    const ch=text[i];
+    if(inQ){
+      if(ch==='"'){if(text[i+1]==='"'){field+='"';i++;}else inQ=false;}
+      else field+=ch;
+    }else{
+      if(ch==='"')inQ=true;
+      else if(ch===','){row.push(field);field='';}
+      else if(ch==='\r'){/* ignore */}
+      else if(ch==='\n'){row.push(field);field='';rows.push(row);row=[];}
+      else field+=ch;
+    }
+  }
+  if(field!==''||row.length){row.push(field);rows.push(row);}
+  return rows;
+}
+
+const CSV_COUNTRY_MAP={'méxico':'Mexico','mexico':'Mexico','usa':'United States','us':'United States','the united states of america':'United States','united states of america':'United States','united states':'United States','dominican rep.':'Dominican Republic','dominican rep':'Dominican Republic','uk':'United Kingdom','great britain':'Great Britain','england':'Great Britain'};
+
+function csvMoney(s){const n=parseFloat(String(s||'').replace(/[$,\s]/g,''));return isNaN(n)?null:n;}
+
+function pcgsMapRow(h,cells){
+  const get=n=>{const i=h.indexOf(n);return i<0?'':String(cells[i]==null?'':cells[i]).trim();};
+  const pcgsNo=get('PCGS #');
+  const dateRaw=get('Date').replace(/\s+/g,' ');
+  const oc=get("Owner's Comments"),pn=get('Personal Notes'),spec=get('Spec Description');
+  let country=get('Region').replace(/\s+/g,' ').trim();
+  const ck=country.toLowerCase();
+  if(CSV_COUNTRY_MAP[ck])country=CSV_COUNTRY_MAP[ck];
+  if(!country)country='Unknown';
+
+  /* Split "1813 PTS" / "2011 P" into year + mint; leave pure years intact */
+  let year=dateRaw,mint='';
+  const dm=dateRaw.match(/^(.*\d)\s+([A-Za-z]{1,4})$/);
+  if(dm){year=dm[1].trim();mint=dm[2];}
+
+  /* Cert detection: NGC serials & PCGS certs hidden in comments; PCGS # column = catalog no. */
+  let certCo='Raw Coin',certNum='';
+  const allTxt=[oc,pn,spec].join(' ');
+  const ngc=allTxt.match(/NGC[^\d]{0,25}(\d{6,8}[-\u2013]\d{2,3})/i);
+  const pcgsCert=allTxt.match(/PCGS[^\d]{0,25}(\d{7,9})(?:[.\/]\d{1,3})?/i);
+  if(ngc){certCo='NGC';certNum=ngc[1].replace('\u2013','-');}
+  else if(pcgsCert){certCo='PCGS';certNum=pcgsCert[1];}
+  else if(pcgsNo){certCo='PCGS';}
+
+  const loc=get('Location').toLowerCase();
+  let status='active';
+  if(loc==='sold')status='sold';else if(loc==='for sale')status='forsale';
+
+  const buyer=get('Buyer'),saleDate=get('SaleDate');
+  const parts=[];
+  if(oc)parts.push(oc);
+  if(pn&&pn!==oc)parts.push(pn);
+  if(spec&&spec!==oc&&spec!==pn)parts.push(spec);
+  if(pcgsNo)parts.push('PCGS Coin #'+pcgsNo);
+  if(status==='sold'&&(buyer||saleDate))parts.push('Sold'+(buyer?' to '+buyer:'')+(saleDate?' on '+saleDate:''));
+  parts.push('Imported from PCGS Set Registry');
+
+  return {
+    certCo,certNum,grade:get('Grade').replace(/\s+/g,' ').trim(),status,
+    country,denomination:get('Denomination'),variety:get('Variety'),
+    mint,year,cost:csvMoney(get('My Cost'))||0,
+    numismaticValue:csvMoney(get('Current Value')),
+    salePrice:csvMoney(get('SoldPrice')),
+    source:get('Source'),comments:parts.join('\n')
+  };
+}
+
+function coinSig(c){
+  if(c.certNum)return 'cert:'+String(c.certNum).replace(/\s/g,'');
+  return 'k:'+[c.country,c.year,c.mint,c.denomination,c.variety,c.grade].map(x=>String(x||'').toLowerCase().trim()).join('|');
+}
+
+function importCSVFile(e){
+  const f=e.target.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=ev=>{try{prepareCSVImport(ev.target.result);}catch(err){toast('Import failed: '+err.message);}};
+  r.onerror=()=>toast('Could not read file');
+  r.readAsText(f);e.target.value='';
+}
+
+function prepareCSVImport(text){
+  const rows=parseCSVText(text);
+  if(rows.length<2)throw new Error('No data rows found');
+  const h=rows[0].map(s=>String(s).trim());
+  if(h.indexOf('Date')<0||h.indexOf('Grade')<0||h.indexOf('Denomination')<0)throw new Error('Headers don\u2019t look like a PCGS inventory CSV');
+  const existing=new Set(coins.map(coinSig));
+  const seen=new Set();
+  csvPending=[];
+  for(let i=1;i<rows.length;i++){
+    if(rows[i].every(c=>!String(c==null?'':c).trim()))continue;
+    const rec=pcgsMapRow(h,rows[i]);
+    const sig=coinSig(rec);
+    rec._dupe=existing.has(sig)||seen.has(sig);
+    seen.add(sig);
+    rec._inc=!rec._dupe;
+    csvPending.push(rec);
+  }
+  if(!csvPending.length)throw new Error('No coins found in file');
+  renderCSVPreview();
+  openModal('csvModal');
+}
+
+function renderCSVPreview(){
+  const dupes=csvPending.filter(r=>r._dupe).length;
+  const inc=csvPending.filter(r=>r._inc).length;
+  document.getElementById('csv-summary').textContent=
+    csvPending.length+' coins in file · '+inc+' selected to import'+(dupes?' · '+dupes+' possible duplicate'+(dupes>1?'s':'')+' (unchecked, shown in red)':'');
+  const rowsHtml=csvPending.map((r,i)=>
+    '<tr style="border-bottom:1px solid var(--border);'+(r._dupe?'color:#e05b5b':'')+'">'+
+    '<td style="padding:6px 8px"><input type="checkbox" '+(r._inc?'checked':'')+' onchange="csvPending['+i+']._inc=this.checked;csvSummaryOnly()"></td>'+
+    '<td style="padding:6px 8px;white-space:nowrap">'+esc(r.country)+'</td>'+
+    '<td style="padding:6px 8px;white-space:nowrap">'+esc(r.year)+(r.mint?' '+esc(r.mint):'')+'</td>'+
+    '<td style="padding:6px 8px">'+esc(r.denomination)+'</td>'+
+    '<td style="padding:6px 8px">'+esc(r.variety)+'</td>'+
+    '<td style="padding:6px 8px;white-space:nowrap">'+esc(r.grade)+'</td>'+
+    '<td style="padding:6px 8px;white-space:nowrap">'+esc(r.certCo)+(r.certNum?' '+esc(r.certNum):'')+'</td>'+
+    '<td style="padding:6px 8px;text-align:right">'+(r.cost?('$'+r.cost.toLocaleString()):'—')+'</td>'+
+    '<td style="padding:6px 8px;text-align:right">'+(r.numismaticValue!=null?('$'+r.numismaticValue.toLocaleString()):'—')+'</td>'+
+    '<td style="padding:6px 8px">'+esc(r.status)+'</td>'+
+    '</tr>').join('');
+  document.getElementById('csv-table').innerHTML=
+    '<thead><tr style="position:sticky;top:0;background:var(--card,#1c1c22)">'+
+    '<th style="padding:6px 8px"></th><th style="padding:6px 8px;text-align:left">Country</th><th style="padding:6px 8px;text-align:left">Date</th>'+
+    '<th style="padding:6px 8px;text-align:left">Denom</th><th style="padding:6px 8px;text-align:left">Variety</th><th style="padding:6px 8px;text-align:left">Grade</th>'+
+    '<th style="padding:6px 8px;text-align:left">Cert</th><th style="padding:6px 8px;text-align:right">Cost</th><th style="padding:6px 8px;text-align:right">Value</th>'+
+    '<th style="padding:6px 8px;text-align:left">Status</th></tr></thead><tbody>'+rowsHtml+'</tbody>';
+}
+
+function csvSummaryOnly(){
+  const dupes=csvPending.filter(r=>r._dupe).length;
+  const inc=csvPending.filter(r=>r._inc).length;
+  document.getElementById('csv-summary').textContent=
+    csvPending.length+' coins in file · '+inc+' selected to import'+(dupes?' · '+dupes+' possible duplicate'+(dupes>1?'s':'')+' (shown in red)':'');
+}
+
+function csvToggleAll(v){csvPending.forEach(r=>r._inc=v);renderCSVPreview();}
+function csvToggleDupes(){csvPending.forEach(r=>{if(r._dupe)r._inc=!r._inc;});renderCSVPreview();}
+
+async function runCSVImport(){
+  const list=csvPending.filter(r=>r._inc);
+  if(!list.length){toast('No coins selected');return;}
+  if(!confirm('Import '+list.length+' coins into MX Registry?'))return;
+  const btn=document.getElementById('csv-import-btn');btn.disabled=true;btn.textContent='Importing…';
+  try{
+    const m=await dbGet('meta','invSeq');let seq=(m?m.val:0);
+    const cn=await dbGet('meta','countries');const custom=cn?cn.val:[];
+    const known=new Set([...BASE_COUNTRIES,...custom].map(s=>s.toLowerCase()));
+    let addedCountries=false;
+    const t0=Date.now();let n=0;
+    for(const r of list){
+      seq++;
+      const c={
+        id:'C'+t0.toString(36).toUpperCase()+'I'+n,
+        invNo:'MX-'+String(seq).padStart(5,'0'),
+        certCo:r.certCo,certNum:r.certNum,grade:r.grade,status:r.status,
+        country:r.country,denomination:r.denomination,variety:r.variety,
+        type:'',mint:r.mint,year:r.year,metal:'',weight:null,fineness:null,
+        cost:r.cost,numismaticValue:r.numismaticValue,salePrice:r.salePrice,
+        datePurchased:'',source:r.source,comments:r.comments,
+        imgObv:null,imgRev:null,imgEdge:null,createdAt:Date.now()
+      };
+      await dbPut('coins',c);
+      if(r.country&&!known.has(r.country.toLowerCase())){known.add(r.country.toLowerCase());custom.push(r.country);addedCountries=true;}
+      n++;
+    }
+    await dbPut('meta',{key:'invSeq',val:seq});
+    if(addedCountries)await dbPut('meta',{key:'countries',val:custom});
+    coins=await dbAll('coins');
+    fillCountrySelect();
+    closeModal('csvModal');
+    renderTable();renderDash();
+    toast('Imported '+n+' coins from PCGS CSV');
+  }catch(err){toast('Import failed: '+err.message);}
+  btn.disabled=false;btn.textContent='📥 Import Selected';
 }
 
 /* ════════════ ALBUM / SLAB LABELS (multi-format, visual picker) ════════════ */
