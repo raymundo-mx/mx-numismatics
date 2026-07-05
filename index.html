@@ -252,17 +252,8 @@ tr.row.sel td{background:rgba(201,168,76,.12)}
       <option value="sold">Sold</option>
       <option value="all">Everything</option>
     </select>
-    <select id="inv-sort" onchange="renderTable()">
-      <option value="added">Last Added</option>
-      <option value="invNo">Inventory No.</option>
-      <option value="denomination">Denomination</option>
-      <option value="certNum">Certificate #</option>
-      <option value="datePurchased">Date Purchased</option>
-      <option value="grade">Grade</option>
-      <option value="mint">Mint Mark</option>
-      <option value="metal">Type of Metal</option>
-    </select>
-    <button class="btn btn-s" onclick="toggleDir()" id="dirBtn">↓ Desc</button>
+    <select id="inv-sort" onchange="renderTable()"></select>
+    <button class="btn btn-s" onclick="toggleDir()" id="dirBtn">↑ Asc</button>
     <button class="btn btn-s" onclick="toggleInvView()" id="viewBtn" title="Switch between table and gallery view">▦ Gallery</button>
     <select id="label-fmt" title="Label size for printing" onchange="syncFlipModeUI()">
       <optgroup label="Adhesive labels">
@@ -519,6 +510,8 @@ tr.row.sel td{background:rgba(201,168,76,.12)}
       <option value="sold">Sold Report</option>
       <option value="insurance">Insurance Report (Comprehensive)</option>
     </select>
+    <select id="rep-sort" onchange="renderReport()"></select>
+    <button class="btn btn-s" onclick="toggleRepDir()" id="repDirBtn">↑ Asc</button>
     <button class="btn btn-s" onclick="renderReport()">View</button>
     <button class="btn btn-s" onclick="exportReportPDF()">📄 Export PDF</button>
   </div>
@@ -554,6 +547,12 @@ tr.row.sel td{background:rgba(201,168,76,.12)}
     <div class="hint" style="margin-bottom:12px">Import your PCGS "My Inventory" CSV export. NGC cert numbers found in comments are detected automatically, Sold/For Sale status is preserved, and each coin gets a new MX-# number. You'll see a preview before anything is saved. Photos are not in the CSV — add them per coin afterward.</div>
     <button class="btn btn-s btn-g" onclick="document.getElementById('csv-inp').click()">📥 Import PCGS CSV</button>
     <input type="file" id="csv-inp" accept=".csv,text/csv" style="display:none" onchange="importCSVFile(event)">
+  </div>
+
+  <div class="sec">
+    <div class="sec-t">🛠 Maintenance</div>
+    <div class="hint" style="margin-bottom:12px">Scans for coins sharing the same MX inventory number. The oldest coin keeps its number; later ones (e.g. from an import) are assigned fresh MX numbers continuing after the highest in use.</div>
+    <button class="btn btn-s" onclick="fixDupInvNos()">🔢 Fix Duplicate MX Numbers</button>
   </div>
 
   <div class="sec">
@@ -661,7 +660,7 @@ tr.row.sel td{background:rgba(201,168,76,.12)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js"></script>
 <script>
 /* ════════════ STATE ════════════ */
-let db, coins=[], certCos=[], sortK='added', sortD=-1, curFilter='allactive',
+let db, coins=[], certCos=[], sortK='invNo', sortD=1, curFilter='allactive',
     imgs={obv:null,rev:null,edge:null}, curSlot=null, modalId=null, scanStream=null;
 const DEFAULT_CERTCO=['PCGS','NGC','ANACS','Raw Coin'];
 let countries=[];
@@ -695,6 +694,7 @@ async function init(){
   countries=[...new Set([...BASE_COUNTRIES,...custom])].sort((a,b)=>a.localeCompare(b));
   const sp=await dbGet('meta','spots'); if(sp){Object.assign(SP,sp.val);spSource=sp.src||'saved';}
   const th=await dbGet('meta','theme'); applyTheme(th?th.val:'light');
+  fillSortSelect('inv-sort','invNo'); fillSortSelect('rep-sort','invNo');
   fillCertCoSelect(); fillCountrySelect(); fillMintSelect(); fillTypeSelect(); fillVarietySelect(); renderCertCoList(); displaySpots(); renderDash(); renderTable();
   getSpots();
 }
@@ -818,6 +818,54 @@ async function toggleTheme(){
 }
 function openFilter(f){curFilter=f;document.getElementById('inv-filter').value=f;go('inv');}
 
+/* ════════════ SHARED SORT ENGINE (inventory + reports) ════════════ */
+const SORT_KEYS=[
+  {g:'Identification',k:'invNo',       label:'MX Inventory #', num:c=>{const n=parseInt(String(c.invNo||'').replace(/\D/g,''),10);return isNaN(n)?null:n;}},
+  {g:'Identification',k:'certNum',     label:'Certificate #',  str:c=>c.certNum},
+  {g:'Identification',k:'certCo',      label:'Cert Company',   str:c=>c.certCo},
+  {g:'Coin',          k:'country',     label:'Country',        str:c=>c.country},
+  {g:'Coin',          k:'year',        label:'Year',           num:c=>{const m=String(c.year||'').match(/\d{1,4}/);return m?parseInt(m[0],10):null;}},
+  {g:'Coin',          k:'denomination',label:'Denomination',   str:c=>c.denomination},
+  {g:'Coin',          k:'variety',     label:'Variety',        str:c=>c.variety},
+  {g:'Coin',          k:'grade',       label:'Grade',          str:c=>c.grade},
+  {g:'Coin',          k:'mint',        label:'Mint Mark',      str:c=>c.mint},
+  {g:'Coin',          k:'metal',       label:'Metal',          str:c=>c.metal},
+  {g:'Financial',     k:'cost',        label:'Cost',           num:c=>(c.cost==null||c.cost==='')?null:+c.cost},
+  {g:'Financial',     k:'value',       label:'Current Value',  num:c=>{const v=currentValue(c);return isNaN(v)?null:v;}},
+  {g:'Financial',     k:'profit',      label:'Profit / Loss',  num:c=>{const v=currentValue(c)-(+c.cost||0);return isNaN(v)?null:v;}},
+  {g:'Dates',         k:'added',       label:'Date Added',     num:c=>c.createdAt||null},
+  {g:'Dates',         k:'datePurchased',label:'Date Purchased',str:c=>c.datePurchased}
+];
+function sortCoins(list,key,dir){
+  const def=SORT_KEYS.find(s=>s.k===key)||SORT_KEYS[0];
+  const invn=c=>{const n=parseInt(String(c.invNo||'').replace(/\D/g,''),10);return isNaN(n)?0:n;};
+  const val=c=>{
+    if(def.num)return def.num(c);
+    const raw=def.str(c);const s=String(raw==null?'':raw).trim();
+    return s?s.toLowerCase():null;
+  };
+  list.sort((a,b)=>{
+    const av=val(a),bv=val(b);
+    if(av==null&&bv==null)return invn(a)-invn(b);
+    if(av==null)return 1;                 /* coins missing the field always sink to the bottom */
+    if(bv==null)return -1;
+    let r=(typeof av==='number')?av-bv:(av<bv?-1:av>bv?1:0);
+    if(r)return r*dir;
+    return invn(a)-invn(b);               /* stable tiebreak: MX # ascending */
+  });
+  return list;
+}
+function fillSortSelect(id,defKey){
+  const sel=document.getElementById(id);if(!sel)return;
+  const groups={};
+  SORT_KEYS.forEach(s=>{(groups[s.g]=groups[s.g]||[]).push(s);});
+  sel.innerHTML=Object.keys(groups).map(g=>
+    '<optgroup label="'+g+'">'+groups[g].map(s=>'<option value="'+s.k+'">'+s.label+'</option>').join('')+'</optgroup>').join('');
+  sel.value=defKey||'invNo';
+}
+let repD=1;
+function toggleRepDir(){repD*=-1;document.getElementById('repDirBtn').textContent=repD<0?'↓ Desc':'↑ Asc';renderReport();}
+
 /* ════════════ INVENTORY TABLE ════════════ */
 function toggleDir(){sortD*=-1;document.getElementById('dirBtn').textContent=sortD<0?'↓ Desc':'↑ Asc';renderTable();}
 let invView='table';   // 'table' | 'gallery'
@@ -835,15 +883,7 @@ function _invList(){
   document.getElementById('inv-title').textContent=({allactive:'All Active Inventory',active:'In-Vault Inventory',grading:'Donations',forsale:'Coins For Sale',consignment:'Coins On Consignment',sold:'Sold Coins',all:'Full Inventory'})[f];
   let list=coins.filter(c=>inFilter(c,f));
   if(q)list=list.filter(c=>[c.invNo,c.country,c.variety,c.type,c.mint,c.denomination,c.certNum,c.grade,c.metal,c.certCo,c.year].join(' ').toLowerCase().includes(q));
-  list.sort((a,b)=>{
-    let av,bv;
-    if(sortK==='added'){av=a.createdAt||0;bv=b.createdAt||0;}
-    else if(sortK==='datePurchased'){av=a.datePurchased||'';bv=b.datePurchased||'';}
-    else if(sortK==='certNum'){av=(a.certNum||'').toString();bv=(b.certNum||'').toString();}
-    else if(sortK==='invNo'){av=(a.invNo||'').toString();bv=(b.invNo||'').toString();}
-    else{av=(a[sortK]||'').toString().toLowerCase();bv=(b[sortK]||'').toString().toLowerCase();}
-    if(av<bv)return -1*sortD; if(av>bv)return 1*sortD; return 0;
-  });
+  sortCoins(list,sortK,sortD);
   const cost=list.reduce((s,c)=>s+(+c.cost||0),0), val=list.reduce((s,c)=>s+currentValue(c),0), pl=val-cost;
   _invFilteredIds=new Set(list.map(c=>c.id));
   document.getElementById('inv-sub').innerHTML=`${list.length} coins · Cost ${money(cost)} · Value ${money(val)} · <span class="${pl>=0?'pos':'neg'}">P/L ${pl>=0?'+':''}${money(pl)}</span>`;
@@ -1402,8 +1442,9 @@ function resetEntry(){
   if(certCos.length)document.getElementById('f-certco').value=certCos[0];
   peekInvNo().then(p=>{const el=document.getElementById('f-invno');if(el&&!el.value)el.placeholder='auto → '+p;});
 }
-async function nextInvNo(){const m=await dbGet('meta','invSeq');const n=(m?m.val:0)+1;await dbPut('meta',{key:'invSeq',val:n});return 'MX-'+String(n).padStart(5,'0');}
-async function peekInvNo(){const m=await dbGet('meta','invSeq');return 'MX-'+String((m?m.val:0)+1).padStart(5,'0');}
+function maxInvNum(){let mx=0;(coins||[]).forEach(c=>{const n=parseInt(String(c.invNo||'').replace(/\D/g,''),10);if(n>mx)mx=n;});return mx;}
+async function nextInvNo(){const m=await dbGet('meta','invSeq');const n=Math.max(m?m.val:0,maxInvNum())+1;await dbPut('meta',{key:'invSeq',val:n});return 'MX-'+String(n).padStart(5,'0');}
+async function peekInvNo(){const m=await dbGet('meta','invSeq');return 'MX-'+String(Math.max(m?m.val:0,maxInvNum())+1).padStart(5,'0');}
 async function syncInvSeq(invNo){const mt=(invNo||'').match(/(\d+)\s*$/);if(!mt)return;const num=parseInt(mt[1],10);const m=await dbGet('meta','invSeq');if(num>(m?m.val:0))await dbPut('meta',{key:'invSeq',val:num});}
 async function saveCoin(){
   const country=document.getElementById('f-country').value.trim();
@@ -1618,7 +1659,12 @@ document.addEventListener('keydown',e=>{
 });
 
 /* ════════════ REPORTS ════════════ */
-function repList(t){let l=coins.filter(c=>inFilter(c,t));l.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));return l;}
+function repList(t){
+  let l=coins.filter(c=>inFilter(c,t));
+  const sel=document.getElementById('rep-sort');
+  sortCoins(l,sel?sel.value:'invNo',repD);
+  return l;
+}
 
 // Title + descriptor for every report type
 const REPORT_TITLE={
@@ -2051,7 +2097,7 @@ async function runCSVImport(){
   if(!confirm('Import '+list.length+' coins into MX Registry?'))return;
   const btn=document.getElementById('csv-import-btn');btn.disabled=true;btn.textContent='Importing…';
   try{
-    const m=await dbGet('meta','invSeq');let seq=(m?m.val:0);
+    const m=await dbGet('meta','invSeq');let seq=Math.max(m?m.val:0,maxInvNum());
     const cn=await dbGet('meta','countries');const custom=cn?cn.val:[];
     const known=new Set([...BASE_COUNTRIES,...custom].map(s=>s.toLowerCase()));
     let addedCountries=false;
@@ -2113,6 +2159,33 @@ async function runCSVCertUpdate(){
   closeModal('csvModal');
   renderTable();renderDash();
   toast('Updated certificates on '+upd+' coins');
+}
+
+/* ════════════ MAINTENANCE ════════════ */
+async function fixDupInvNos(){
+  const byNo={};
+  coins.forEach(c=>{const k=String(c.invNo||'');(byNo[k]=byNo[k]||[]).push(c);});
+  const toFix=[];
+  Object.keys(byNo).forEach(k=>{
+    if(!k){toFix.push(...byNo[k]);return;}                 /* coins with no number at all */
+    if(byNo[k].length>1){
+      const arr=byNo[k].slice().sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
+      toFix.push(...arr.slice(1));                          /* oldest keeps the number */
+    }
+  });
+  if(!toFix.length){toast('No duplicate MX numbers found ✓');return;}
+  if(!confirm(toFix.length+' coin(s) share an MX number with an older coin. Assign them fresh MX numbers? (Oldest coin keeps the original number.)'))return;
+  const m=await dbGet('meta','invSeq');
+  let seq=Math.max(m?m.val:0,maxInvNum());
+  for(const c of toFix){
+    seq++;
+    c.invNo='MX-'+String(seq).padStart(5,'0');
+    await dbPut('coins',c);
+  }
+  await dbPut('meta',{key:'invSeq',val:seq});
+  coins=await dbAll('coins');
+  renderTable();renderDash();
+  toast('Renumbered '+toFix.length+' coins — sequence now at MX-'+String(seq).padStart(5,'0'));
 }
 
 /* ════════════ ALBUM / SLAB LABELS (multi-format, visual picker) ════════════ */
