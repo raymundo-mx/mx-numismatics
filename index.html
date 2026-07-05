@@ -594,8 +594,9 @@ tr.row.sel td{background:rgba(201,168,76,.12)}
         <table style="width:100%;border-collapse:collapse;font-size:12px" id="csv-table"></table>
       </div>
     </div>
-    <div class="modal-c" style="border-top:1px solid var(--border);display:flex;gap:10px;justify-content:flex-end">
+    <div class="modal-c" style="border-top:1px solid var(--border);display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
       <button class="btn btn-s" onclick="closeModal('csvModal')">Cancel</button>
+      <button class="btn btn-s" onclick="runCSVCertUpdate()" title="Fill cert numbers into coins already in the registry — creates nothing new">🔁 Update Certs on Matches</button>
       <button class="btn btn-s btn-g" onclick="runCSVImport()" id="csv-import-btn">📥 Import Selected</button>
     </div>
   </div>
@@ -922,6 +923,7 @@ function openDetail(id){
       ${row('Status',STATUS_LABEL[c.status])}
       ${row('Cert Company',c.certCo)}
       ${row('Certificate #',c.certNum)}
+      ${row('PCGS Coin #',pcgsNoOf(c))}
       ${row('Country',c.country)}
       ${row('Denomination',c.denomination)}
       ${row('Year',c.year)}
@@ -942,9 +944,17 @@ function openDetail(id){
       ${row('Source',c.source)}
     </div>
     ${c.comments?`<div style="margin-top:14px"><div class="k" style="font-family:'JetBrains Mono';font-size:11px;color:var(--muted)">COMMENTS</div><div style="margin-top:4px">${esc(c.comments)}</div></div>`:''}
-    ${c.certCo&&c.certNum&&certLookupUrl(c.certCo,c.certNum)?`<div style="margin-top:14px"><a class="btn btn-s" href="${certLookupUrl(c.certCo,c.certNum)}" target="_blank">🔗 Verify on ${esc(c.certCo)}</a></div>`:''}
+    ${(c.certCo&&c.certNum&&certLookupUrl(c.certCo,c.certNum))||pcgsNoOf(c)?`<div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">
+      ${c.certCo&&c.certNum&&certLookupUrl(c.certCo,c.certNum)?`<a class="btn btn-s" href="${certLookupUrl(c.certCo,c.certNum)}" target="_blank">🔗 Verify on ${esc(c.certCo)}</a>`:''}
+      ${pcgsNoOf(c)?`<a class="btn btn-s" href="https://www.pcgs.com/coinfacts/coin/${esc(pcgsNoOf(c))}" target="_blank">📷 PCGS CoinFacts</a>`:''}
+    </div>`:''}
   `;
   openModal('detailModal');
+}
+function pcgsNoOf(c){
+  if(c.pcgsNo)return String(c.pcgsNo);
+  const m=(c.comments||'').match(/PCGS Coin #(\d{3,7})/);
+  return m?m[1]:'';
 }
 function certLookupUrl(co,cert){const m={PCGS:'https://www.pcgs.com/cert/'+cert,NGC:'https://www.ngccoin.com/certlookup/'+cert+'/',ANACS:'https://www.anacs.com/verify/?certnum='+cert};return m[co]||'';}
 /* ════════════ LIGHTBOX (dynamic pinch / wheel / drag zoom) ════════════ */
@@ -1923,12 +1933,14 @@ function pcgsMapRow(h,cells){
   const dm=dateRaw.match(/^(.*\d)\s+([A-Za-z]{1,4})$/);
   if(dm){year=dm[1].trim();mint=dm[2];}
 
-  /* Cert detection: NGC serials & PCGS certs hidden in comments; PCGS # column = catalog no. */
+  /* Cert detection: dedicated Cert # column (new PCGS export) wins; then NGC/PCGS serials in comments; PCGS # column = catalog no. */
   let certCo='Raw Coin',certNum='';
+  const certCol=get('Cert #').replace(/\s/g,'');
   const allTxt=[oc,pn,spec].join(' ');
   const ngc=allTxt.match(/NGC[^\d]{0,25}(\d{6,8}[-\u2013]\d{2,3})/i);
   const pcgsCert=allTxt.match(/PCGS[^\d]{0,25}(\d{7,9})(?:[.\/]\d{1,3})?/i);
-  if(ngc){certCo='NGC';certNum=ngc[1].replace('\u2013','-');}
+  if(certCol&&/^\d{6,10}$/.test(certCol)){certCo='PCGS';certNum=certCol;}
+  else if(ngc){certCo='NGC';certNum=ngc[1].replace('\u2013','-');}
   else if(pcgsCert){certCo='PCGS';certNum=pcgsCert[1];}
   else if(pcgsNo){certCo='PCGS';}
 
@@ -1946,7 +1958,7 @@ function pcgsMapRow(h,cells){
   parts.push('Imported from PCGS Set Registry');
 
   return {
-    certCo,certNum,grade:get('Grade').replace(/\s+/g,' ').trim(),status,
+    pcgsNo,certCo,certNum,grade:get('Grade').replace(/\s+/g,' ').trim(),status,
     country,denomination:get('Denomination'),variety:get('Variety'),
     mint,year,cost:csvMoney(get('My Cost'))||0,
     numismaticValue:csvMoney(get('Current Value')),
@@ -1955,9 +1967,17 @@ function pcgsMapRow(h,cells){
   };
 }
 
+function coinKeySig(c){
+  return 'k:'+[c.country,c.year,c.mint,c.denomination,c.variety,c.grade].map(x=>String(x||'').toLowerCase().trim()).join('|');
+}
 function coinSig(c){
   if(c.certNum)return 'cert:'+String(c.certNum).replace(/\s/g,'');
-  return 'k:'+[c.country,c.year,c.mint,c.denomination,c.variety,c.grade].map(x=>String(x||'').toLowerCase().trim()).join('|');
+  return coinKeySig(c);
+}
+function existingSigSet(){
+  const s=new Set();
+  coins.forEach(c=>{s.add(coinKeySig(c));if(c.certNum)s.add('cert:'+String(c.certNum).replace(/\s/g,''));});
+  return s;
 }
 
 function importCSVFile(e){
@@ -1973,15 +1993,14 @@ function prepareCSVImport(text){
   if(rows.length<2)throw new Error('No data rows found');
   const h=rows[0].map(s=>String(s).trim());
   if(h.indexOf('Date')<0||h.indexOf('Grade')<0||h.indexOf('Denomination')<0)throw new Error('Headers don\u2019t look like a PCGS inventory CSV');
-  const existing=new Set(coins.map(coinSig));
+  const existing=existingSigSet();
   const seen=new Set();
   csvPending=[];
   for(let i=1;i<rows.length;i++){
     if(rows[i].every(c=>!String(c==null?'':c).trim()))continue;
     const rec=pcgsMapRow(h,rows[i]);
-    const sig=coinSig(rec);
-    rec._dupe=existing.has(sig)||seen.has(sig);
-    seen.add(sig);
+    rec._dupe=existing.has(coinSig(rec))||existing.has(coinKeySig(rec))||seen.has(coinSig(rec));
+    seen.add(coinSig(rec));
     rec._inc=!rec._dupe;
     csvPending.push(rec);
   }
@@ -2003,7 +2022,7 @@ function renderCSVPreview(){
     '<td style="padding:6px 8px">'+esc(r.denomination)+'</td>'+
     '<td style="padding:6px 8px">'+esc(r.variety)+'</td>'+
     '<td style="padding:6px 8px;white-space:nowrap">'+esc(r.grade)+'</td>'+
-    '<td style="padding:6px 8px;white-space:nowrap">'+esc(r.certCo)+(r.certNum?' '+esc(r.certNum):'')+'</td>'+
+    '<td style="padding:6px 8px;white-space:nowrap">'+esc(r.certCo)+(r.certNum?' '+esc(r.certNum):'')+(r.pcgsNo?' <span style="opacity:.65">#'+esc(r.pcgsNo)+'</span>':'')+'</td>'+
     '<td style="padding:6px 8px;text-align:right">'+(r.cost?('$'+r.cost.toLocaleString()):'—')+'</td>'+
     '<td style="padding:6px 8px;text-align:right">'+(r.numismaticValue!=null?('$'+r.numismaticValue.toLocaleString()):'—')+'</td>'+
     '<td style="padding:6px 8px">'+esc(r.status)+'</td>'+
@@ -2042,7 +2061,7 @@ async function runCSVImport(){
       const c={
         id:'C'+t0.toString(36).toUpperCase()+'I'+n,
         invNo:'MX-'+String(seq).padStart(5,'0'),
-        certCo:r.certCo,certNum:r.certNum,grade:r.grade,status:r.status,
+        certCo:r.certCo,certNum:r.certNum,pcgsNo:r.pcgsNo||'',grade:r.grade,status:r.status,
         country:r.country,denomination:r.denomination,variety:r.variety,
         type:'',mint:r.mint,year:r.year,metal:'',weight:null,fineness:null,
         cost:r.cost,numismaticValue:r.numismaticValue,salePrice:r.salePrice,
@@ -2062,6 +2081,38 @@ async function runCSVImport(){
     toast('Imported '+n+' coins from PCGS CSV');
   }catch(err){toast('Import failed: '+err.message);}
   btn.disabled=false;btn.textContent='📥 Import Selected';
+}
+
+/* Update certs on coins already in the registry: matches by country+date+mint+denom+variety+grade,
+   fills Certificate #, Cert Company and PCGS Coin # on coins that don't have a cert yet. Creates nothing. */
+async function runCSVCertUpdate(){
+  /* skip certs already assigned to a coin in the registry (prevents copying onto duplicate raw entries) */
+  const assigned=new Set(coins.filter(c=>c.certNum).map(c=>String(c.certNum).replace(/\s/g,'')));
+  const withCert=csvPending.filter(r=>r.certNum&&!assigned.has(String(r.certNum).replace(/\s/g,'')));
+  if(!withCert.length){toast('No new cert numbers in this file');return;}
+  /* queue of existing coins lacking a cert, grouped by key signature */
+  const q={};
+  coins.forEach(c=>{if(!c.certNum){const k=coinKeySig(c);(q[k]=q[k]||[]).push(c);}});
+  /* dry-run count */
+  const qc={};Object.keys(q).forEach(k=>qc[k]=q[k].length);
+  let would=0;
+  withCert.forEach(r=>{const k=coinKeySig(r);if(qc[k]>0){qc[k]--;would++;}});
+  if(!would){toast('No matching coins without certs found');return;}
+  if(!confirm('Fill certificate numbers on '+would+' existing coins? No new coins will be created.'))return;
+  let upd=0;
+  for(const r of withCert){
+    const arr=q[coinKeySig(r)];
+    if(arr&&arr.length){
+      const c=arr.shift();
+      c.certCo=r.certCo;c.certNum=r.certNum;
+      if(!c.pcgsNo&&r.pcgsNo)c.pcgsNo=r.pcgsNo;
+      await dbPut('coins',c);upd++;
+    }
+  }
+  coins=await dbAll('coins');
+  closeModal('csvModal');
+  renderTable();renderDash();
+  toast('Updated certificates on '+upd+' coins');
 }
 
 /* ════════════ ALBUM / SLAB LABELS (multi-format, visual picker) ════════════ */
