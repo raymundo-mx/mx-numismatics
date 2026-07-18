@@ -348,6 +348,7 @@ tr.row.sel td{background:rgba(201,168,76,.12)}
         <input id="f-mint-other" placeholder="Enter mint mark…" style="display:none;margin-top:6px">
       </div>
       <div class="fg"><label>Year / Date</label><input id="f-year" placeholder="1947"></div>
+      <div class="fg"><label>Mintage (coins minted)</label><input id="f-mintage" placeholder="e.g. 1,250,000 · Est. 500 · Unknown"></div>
     </div>
   </div>
 
@@ -671,7 +672,7 @@ tr.row.sel td{background:rgba(201,168,76,.12)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js"></script>
 <script>
 /* ════════════ STATE ════════════ */
-const APP_VERSION='v2.1 · 2026-07-08';
+const APP_VERSION='v2.2 · 2026-07-12';
 let db, coins=[], certCos=[], sortK='invNo', sortD=1, curFilter='allactive',
     imgs={obv:null,rev:null,edge:null}, curSlot=null, modalId=null, scanStream=null;
 const DEFAULT_CERTCO=['PCGS','NGC','ANACS','Raw Coin'];
@@ -840,6 +841,7 @@ const SORT_KEYS=[
   {g:'Identification',k:'certCo',      label:'Cert Company',   str:c=>c.certCo},
   {g:'Coin',          k:'country',     label:'Country',        str:c=>c.country},
   {g:'Coin',          k:'year',        label:'Year',           num:c=>{const m=String(c.year||'').match(/\d{1,4}/);return m?parseInt(m[0],10):null;}},
+  {g:'Coin',          k:'mintage',     label:'Mintage (Rarity)',num:c=>mintageNum(c)},
   {g:'Coin',          k:'denomination',label:'Denomination',   str:c=>c.denomination},
   {g:'Coin',          k:'variety',     label:'Variety',        str:c=>c.variety},
   {g:'Coin',          k:'grade',       label:'Grade',          str:c=>c.grade},
@@ -906,7 +908,7 @@ function _invList(){
   const q=document.getElementById('inv-q').value.toLowerCase().trim();
   document.getElementById('inv-title').textContent=({allactive:'All Active Inventory',active:'In-Vault Inventory',grading:'Donations',forsale:'Coins For Sale',consignment:'Coins On Consignment',sold:'Sold Coins',all:'Full Inventory'})[f];
   let list=coins.filter(c=>inFilter(c,f));
-  if(q)list=list.filter(c=>[c.invNo,c.country,c.variety,c.type,c.mint,c.denomination,c.certNum,c.grade,c.metal,c.certCo,c.year].join(' ').toLowerCase().includes(q));
+  if(q)list=list.filter(c=>[c.invNo,c.country,c.variety,c.type,c.mint,c.denomination,c.certNum,c.grade,c.metal,c.certCo,c.year,c.mintage].join(' ').toLowerCase().includes(q));
   sortCoins(list,sortK,sortD);
   const cost=list.reduce((s,c)=>s+(+c.cost||0),0), val=list.reduce((s,c)=>s+currentValue(c),0), pl=val-cost;
   _invFilteredIds=new Set(list.map(c=>c.id));
@@ -991,6 +993,7 @@ function openDetail(id){
       ${row('Country',c.country)}
       ${row('Denomination',c.denomination)}
       ${row('Year',c.year)}
+      ${row('Mintage',mintageDisplay(c))}
       ${row('Type',c.type)}
       ${row('Variety',c.variety)}
       ${row('Mint Mark',c.mint)}
@@ -1019,6 +1022,26 @@ function pcgsNoOf(c){
   if(c.pcgsNo)return String(c.pcgsNo);
   const m=(c.comments||'').match(/PCGS Coin #(\d{3,7})/);
   return m?m[1]:'';
+}
+/* Mintage: stored as free text ("1,250,000", "Est. 500", "Unknown"); parse the number for sorting/rarity */
+function mintageNum(c){
+  const m=String(c.mintage||'').replace(/[,.\s]/g,'').match(/\d{1,12}/);
+  return m?parseInt(m[0],10):null;
+}
+function mintageDisplay(c){
+  const raw=String(c.mintage||'').trim();
+  if(!raw)return '';
+  const n=mintageNum(c);
+  if(n==null)return raw;
+  let tier='';
+  if(n<=100)tier='Extremely Rare';
+  else if(n<=1000)tier='Very Rare';
+  else if(n<=10000)tier='Rare';
+  else if(n<=100000)tier='Scarce';
+  else if(n<=1000000)tier='Uncommon';
+  else tier='Common';
+  const shown=/^\d[\d,.\s]*$/.test(raw)?n.toLocaleString():raw;
+  return shown+' · '+tier;
 }
 function certLookupUrl(co,cert){const m={PCGS:'https://www.pcgs.com/cert/'+cert,NGC:'https://www.ngccoin.com/certlookup/'+cert+'/',ANACS:'https://www.anacs.com/verify/?certnum='+cert};return m[co]||'';}
 /* ════════════ LIGHTBOX (dynamic pinch / wheel / drag zoom) ════════════ */
@@ -1457,7 +1480,7 @@ function resetEntry(){
   fillMintSelect();setMintValue('');
   fillTypeSelect();setTypeValue('');
   fillVarietySelect();setVarietyValue('');
-  ['f-invno','f-cert','f-grade','f-country','f-denom','f-variety','f-year','f-weight','f-fineness','f-cost','f-numis','f-sale','f-source','f-comments','edit-id'].forEach(id=>document.getElementById(id).value='');
+  ['f-invno','f-cert','f-grade','f-country','f-denom','f-variety','f-year','f-mintage','f-weight','f-fineness','f-cost','f-numis','f-sale','f-source','f-comments','edit-id'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('f-metal').value='';document.getElementById('f-status').value='active';
   document.getElementById('f-date').value=new Date().toISOString().split('T')[0];
   document.getElementById('f-value').value='$0.00';document.getElementById('pl-hint').innerHTML='';
@@ -1490,6 +1513,7 @@ async function saveCoin(){
     type:getTypeValue(),
     mint:getMintValue(),
     year:document.getElementById('f-year').value.trim(),
+    mintage:document.getElementById('f-mintage').value.trim(),
     metal:document.getElementById('f-metal').value,
     weight:parseFloat(document.getElementById('f-weight').value)||null,
     fineness:parseFloat(document.getElementById('f-fineness').value)||null,
@@ -1523,6 +1547,7 @@ function editCoin(){
   fillVarietySelect();setVarietyValue(c.variety||'');
   fillMintSelect();setMintValue(c.mint||'');
   document.getElementById('f-year').value=c.year||'';
+  document.getElementById('f-mintage').value=c.mintage||'';
   document.getElementById('f-metal').value=c.metal||'';
   document.getElementById('f-weight').value=c.weight??'';
   document.getElementById('f-fineness').value=c.fineness??'';
