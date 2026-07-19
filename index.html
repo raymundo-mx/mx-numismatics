@@ -275,8 +275,8 @@ tr.row.sel td{background:rgba(201,168,76,.12)}
         <option value="flip25">Flip insert · 2.5×2.5″ (2.375″)</option>
       </optgroup>
     </select>
-    <span id="flip-mode-wrap" style="display:none">
-      <select id="flip-mode" title="Insert text">
+    <span id="flip-mode-wrap">
+      <select id="flip-mode" title="Label content">
         <option value="data">Auto-fill from coin</option>
         <option value="blank">Blank write-on lines</option>
       </select>
@@ -673,7 +673,7 @@ tr.row.sel td{background:rgba(201,168,76,.12)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js"></script>
 <script>
 /* ════════════ STATE ════════════ */
-const APP_VERSION='v2.4 · 2026-07-18';
+const APP_VERSION='v2.8 · 2026-07-19';
 let db, coins=[], certCos=[], sortK='invNo', sortD=1, curFilter='allactive',
     imgs={obv:null,rev:null,edge:null}, curSlot=null, modalId=null, scanStream=null;
 const DEFAULT_CERTCO=['PCGS','NGC','ANACS','Raw Coin'];
@@ -2405,6 +2405,11 @@ function flipCard(c, mode, sizeIn){
   </div>`;
 }
 
+/* ── Blank write-on labels: generic hand-fill template rows (used by mode 'blank' on adhesive formats) ── */
+function _writeOnRows(fields){
+  return fields.map(k=>`<div class="wl"><span class="k">${k}</span><span class="line"></span></div>`).join('');
+}
+
 const LABEL_FORMATS = {
   '8167': {
     // Avery 8167 — 1.75" × 0.5", 80 per letter sheet (4 cols × 20 rows)
@@ -2412,7 +2417,7 @@ const LABEL_FORMATS = {
     cols: 4, rows: 20, total: 80,
     aspect: '1.75/0.5',
     css: `<style>
-      @page{size:letter;margin:0.5in 0.3in}
+      @page{size:letter;margin:0.5in 0.3in 0.2in 0.3in}
       *{box-sizing:border-box}
       html,body{margin:0;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
       .sheet{display:grid;grid-template-columns:repeat(4,1.75in);column-gap:0.3in;row-gap:0}
@@ -2435,9 +2440,14 @@ const LABEL_FORMATS = {
       .label .val .pl.pos{color:#0a6b22}.label .val .pl.neg{color:#9e1b14}
       .label .cert{font-size:5.8px;font-weight:700;font-family:'Courier New',monospace;white-space:nowrap;overflow:hidden;
         text-overflow:ellipsis;margin-top:.4px;color:#222}
+      .label .wrows{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;justify-content:space-between}
+      .label .wl{display:flex;align-items:flex-end;gap:3px;font-size:6.5px;line-height:1.1;flex:1 1 auto}
+      .label .wl .k{color:#444;font-weight:700;flex:0 0 auto}
+      .label .wl .line{flex:1 1 auto;border-bottom:0.75pt solid #555;height:0.85em}
       .label.blank{border:none;background:none}
     </style>`,
-    card(c){
+    card(c,mode){
+      if(mode==='blank')return `<div class="label"><img class="wm" src="${LABEL_LOGO}" alt=""><div class="wrows">${_writeOnRows(['MX','Coin','Grade','Value'])}</div></div>`;
       const f=_lblFields(c);
       const svc = [f.service, c.grade].filter(Boolean).map(esc).join(' ') || '—';
       const mid = [c.country, c.denomination, c.year, c.mintage?('Mtg '+mintageShort(c)):''].filter(Boolean).map(esc).join(' · ') || '—';
@@ -2462,7 +2472,7 @@ const LABEL_FORMATS = {
     cols: 4, rows: 8, total: 32,
     aspect: '1.75/1.25',
     css: `<style>
-      @page{size:letter;margin:0.5in 0.28125in}
+      @page{size:letter;margin:0.5in 0.28125in 0.2in 0.28125in}
       *{box-sizing:border-box}
       html,body{margin:0;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
       .sheet{display:grid;grid-template-columns:repeat(4,1.75in);column-gap:0.3125in;row-gap:0}
@@ -2485,19 +2495,26 @@ const LABEL_FORMATS = {
       .label .val .pl.pos{color:#0a6b22}.label .val .pl.neg{color:#9e1b14}
       .label .cert{font-size:8px;font-weight:700;font-family:'Courier New',monospace;white-space:nowrap;overflow:hidden;
         text-overflow:ellipsis;margin-top:1px;color:#222}
+      .label .wrows{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;justify-content:space-between}
+      .label .wl{display:flex;align-items:flex-end;gap:3px;font-size:8px;line-height:1.1;flex:1 1 auto}
+      .label .wl .k{color:#444;font-weight:700;flex:0 0 auto}
+      .label .wl .line{flex:1 1 auto;border-bottom:0.75pt solid #555;height:0.85em}
       .label.blank{border:none;background:none}
     </style>`,
-    card(c){
+    card(c,mode){
+      if(mode==='blank')return `<div class="label"><img class="wm" src="${LABEL_LOGO}" alt=""><div class="wrows">${_writeOnRows(['MX #','Country','Denomination · Year','Mint · Variety','Grade · Cert #','Mintage','Value'])}</div></div>`;
       const f=_lblFields(c);
       const svc = [f.service, c.grade].filter(Boolean).map(esc).join(' ') || '—';
       const mid = [c.country, c.denomination, c.year].filter(Boolean).map(esc).join(' · ') || '—';
-      const sub = [c.mint?('Mint '+c.mint):'', c.variety, c.mintage?('Mtg '+mintageShort(c)+(rarityTier(mintageNum(c))?' · '+rarityTier(mintageNum(c)):'')):''].filter(Boolean).map(esc).join(' · ');
+      const sub = [c.mint?('Mint '+c.mint):'', c.variety].filter(Boolean).map(esc).join(' · ');
+      const mtg = c.mintage?('Mtg '+esc(mintageDisplay(c))):'';
       return `<div class="label">
         <img class="wm" src="${LABEL_LOGO}" alt="">
         ${c.invNo?`<div class="inv">${esc(c.invNo)}</div>`:''}
         <div class="svc">${svc}</div>
         <div class="mid">${mid}</div>
         ${sub?`<div class="sub">${sub}</div>`:''}
+        ${mtg?`<div class="sub">${mtg}</div>`:''}
         <div class="val">${f.val} <span class="pl ${f.plPos?'pos':'neg'}">${f.plCode}</span></div>
         <div class="cert">${esc(c.certNum||'—')}</div>
       </div>`;
@@ -2511,7 +2528,7 @@ const LABEL_FORMATS = {
     cols: 4, rows: 9, total: 36,
     aspect: '1.5/1',
     css: `<style>
-      @page{size:letter;margin:0.5in 0.5in}
+      @page{size:letter;margin:0.5in 0.5in 0.2in 0.5in}
       *{box-sizing:border-box}
       html,body{margin:0;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
       .sheet{display:grid;grid-template-columns:repeat(4,1.5in);column-gap:0.12in;row-gap:0.06in}
@@ -2532,9 +2549,14 @@ const LABEL_FORMATS = {
       .label .val .pl.pos{color:#0a6b22}.label .val .pl.neg{color:#9e1b14}
       .label .cert{font-size:6.5px;font-weight:700;font-family:'Courier New',monospace;white-space:nowrap;overflow:hidden;
         text-overflow:ellipsis;margin-top:1px;color:#222}
+      .label .wrows{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;justify-content:space-between}
+      .label .wl{display:flex;align-items:flex-end;gap:3px;font-size:7.5px;line-height:1.1;flex:1 1 auto}
+      .label .wl .k{color:#444;font-weight:700;flex:0 0 auto}
+      .label .wl .line{flex:1 1 auto;border-bottom:0.75pt solid #555;height:0.85em}
       .label.blank{border:none;background:none}
     </style>`,
-    card(c){
+    card(c,mode){
+      if(mode==='blank')return `<div class="label"><img class="wm" src="${LABEL_LOGO}" alt=""><div class="wrows">${_writeOnRows(['MX #','Country','Denom / Year','Grade · Cert','Value'])}</div></div>`;
       const f=_lblFields(c);
       const svc = [f.service, c.grade].filter(Boolean).map(esc).join(' ') || '—';
       const mid = [c.country, c.denomination, c.year, c.mintage?('Mtg '+mintageShort(c)):''].filter(Boolean).map(esc).join(' · ') || '—';
@@ -2556,7 +2578,7 @@ const LABEL_FORMATS = {
     cols: 3, rows: 9, total: 27,
     aspect: '2/1',
     css: `<style>
-      @page{size:letter;margin:0.5in 0.5in}
+      @page{size:letter;margin:0.5in 0.5in 0.2in 0.5in}
       *{box-sizing:border-box}
       html,body{margin:0;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
       .sheet{display:grid;grid-template-columns:repeat(3,2in);column-gap:0.12in;row-gap:0.06in}
@@ -2579,9 +2601,14 @@ const LABEL_FORMATS = {
       .label .val .pl.pos{color:#0a6b22}.label .val .pl.neg{color:#9e1b14}
       .label .cert{font-size:7.5px;font-weight:700;font-family:'Courier New',monospace;white-space:nowrap;overflow:hidden;
         text-overflow:ellipsis;margin-top:1px;color:#222}
+      .label .wrows{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;justify-content:space-between}
+      .label .wl{display:flex;align-items:flex-end;gap:3px;font-size:8px;line-height:1.1;flex:1 1 auto}
+      .label .wl .k{color:#444;font-weight:700;flex:0 0 auto}
+      .label .wl .line{flex:1 1 auto;border-bottom:0.75pt solid #555;height:0.85em}
       .label.blank{border:none;background:none}
     </style>`,
-    card(c){
+    card(c,mode){
+      if(mode==='blank')return `<div class="label"><img class="wm" src="${LABEL_LOGO}" alt=""><div class="wrows">${_writeOnRows(['MX #','Country','Denom / Year','Grade · Cert','Value'])}</div></div>`;
       const f=_lblFields(c);
       const svc = [f.service, c.grade].filter(Boolean).map(esc).join(' ') || '—';
       const mid = [c.country, c.denomination, c.year, c.mintage?('Mtg '+mintageShort(c)):''].filter(Boolean).map(esc).join(' · ') || '—';
@@ -2599,22 +2626,22 @@ const LABEL_FORMATS = {
 
   'flip2': {
     // Insert for 2×2 SuperSafe flip — insert = flip − 1/8" = 1.875" square
-    // 4 cols × 5 rows = 20 per letter sheet · 75# card stock · single-sided
+    // 4 cols × 5 rows = 20 per letter sheet (exact-fit margins, printed at full insert size) · 75# card stock
     name: 'Flip insert · 2×2″ (1.875″)',
     cols: 4, rows: 5, total: 20,
     aspect: '1/1', isFlip: true, insertIn: 1.875,
-    css: flipCSS(1.78125, 4, '0.4in 0.3in', '0.1in'),
+    css: flipCSS(1.875, 4, '0.5625in 0.3125in 0.2in 0.3125in', '0.125in'),
     card(c, mode){ return flipCard(c, mode, 1.875); },
     blank(){ return `<div class="label blank"></div>`; }
   },
 
   'flip25': {
     // Insert for 2.5×2.5 SuperSafe flip — insert = flip − 1/8" = 2.375" square
-    // 3 cols × 4 rows = 12 per letter sheet · 75# card stock · single-sided
+    // 3 cols × 4 rows = 12 per letter sheet (exact-fit margins, printed at full insert size) · 75# card stock
     name: 'Flip insert · 2.5×2.5″ (2.375″)',
     cols: 3, rows: 4, total: 12,
     aspect: '1/1', isFlip: true, insertIn: 2.375,
-    css: flipCSS(2.25625, 3, '0.4in 0.3in', '0.1in'),
+    css: flipCSS(2.375, 3, '0.5625in 0.5625in 0.2in 0.5625in', '0.125in'),
     card(c, mode){ return flipCard(c, mode, 2.375); },
     blank(){ return `<div class="label blank"></div>`; }
   }
@@ -2631,18 +2658,23 @@ function currentFlipMode(){
 }
 /* Show the data/blank toggle only when a flip-insert format is selected */
 function syncFlipModeUI(){
-  const fmt=LABEL_FORMATS[currentLabelFmt()];
+  /* the Auto-fill / Blank write-on selector now applies to every label format */
   const wrap=document.getElementById('flip-mode-wrap');
-  if(wrap) wrap.style.display = (fmt && fmt.isFlip) ? '' : 'none';
+  if(wrap) wrap.style.display = '';
 }
 
 function buildLabelsHTML(items, startOffset, fmtKey, mode){
   const fmt = LABEL_FORMATS[fmtKey] || LABEL_FORMATS['8167'];
   const off = Math.max(0, Math.min(fmt.total-1, parseInt(startOffset,10)||0));
-  const blanks = Array.from({length:off}, ()=>fmt.blank()).join('');
-  const cards = blanks + items.map(c=>fmt.card(c, mode)).join('');
-  return `<!DOCTYPE html><html><head><title>${esc(fmt.name)} Labels</title>${fmt.css}</head>
-    <body><div class="sheet">${cards}</div></body></html>`;
+  /* Chunk into explicit per-page sheets (fmt.total cells each) with forced page breaks.
+     Browsers fragment CSS grids unreliably across printed pages; explicit sheets guarantee
+     exactly 20 (2×2) / 12 (2.5×2.5) / etc. per page with no overrun on multi-page jobs. */
+  const all = [...Array.from({length:off}, ()=>fmt.blank()), ...items.map(c=>fmt.card(c, mode))];
+  const pages = [];
+  for(let i=0;i<all.length;i+=fmt.total) pages.push(`<div class="sheet">${all.slice(i,i+fmt.total).join('')}</div>`);
+  const pageBreakCSS = `<style>.sheet{break-after:page;page-break-after:always;break-inside:avoid;page-break-inside:avoid}.sheet:last-child{break-after:auto;page-break-after:auto}</style>`;
+  return `<!DOCTYPE html><html><head><title>${esc(fmt.name)} Labels</title>${fmt.css}${pageBreakCSS}</head>
+    <body>${pages.join('')}</body></html>`;
 }
 
 /* ── Label selection ── */
@@ -2792,7 +2824,7 @@ function popupHelp(){
 async function printLabels(ids){
   const fmtKey = currentLabelFmt();
   const fmt = LABEL_FORMATS[fmtKey] || LABEL_FORMATS['8167'];
-  const mode = fmt.isFlip ? currentFlipMode() : 'data';
+  const mode = currentFlipMode();
   if(Array.isArray(ids)&&ids.length){
     const items=ids.map(id=>coins.find(c=>c.id===id)).filter(Boolean);
     if(!items.length){ toast('No coins to print'); return; }
@@ -2806,6 +2838,19 @@ async function printLabels(ids){
     if(!visible.length){ toast('No coins in this view'); return; }
     if(!confirm(`No coins are checked.\n\nPrint labels for all ${visible.length} coin(s) currently shown?`)) return;
     chosen=visible;
+  }
+  /* Blank write-on mode: no coin data needed — print N generic templates */
+  if(mode==='blank'){
+    let n=chosen.length;
+    if(!n){
+      const q=prompt('How many blank write-on labels?', fmt.total);
+      if(q===null) return;
+      n=Math.max(1, Math.min(fmt.total*10, parseInt(q,10)||fmt.total));
+    }
+    const off=await averyPick(n, fmtKey);
+    if(off===null) return;
+    await printHTML(buildLabelsHTML(Array.from({length:n},()=>({})), off, fmtKey, 'blank'));
+    return;
   }
   // Cert-number nudge applies to the small slab-style labels, not flip inserts
   if(!fmt.isFlip){
