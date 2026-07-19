@@ -266,6 +266,7 @@ tr.row.sel td{background:rgba(201,168,76,.12)}
     <select id="label-fmt" title="Label size for printing" onchange="syncFlipModeUI()">
       <optgroup label="Adhesive labels">
         <option value="8167">Avery 8167 · 1.75×0.5″</option>
+        <option value="presta94226">Avery Presta 94226 · 1.75×1.25″ (32, removable)</option>
         <option value="rect15">Rectangle · 1.5×1.0″</option>
         <option value="rect20">Rectangle · 2.0×1.0″</option>
       </optgroup>
@@ -672,7 +673,7 @@ tr.row.sel td{background:rgba(201,168,76,.12)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js"></script>
 <script>
 /* ════════════ STATE ════════════ */
-const APP_VERSION='v2.2 · 2026-07-12';
+const APP_VERSION='v2.4 · 2026-07-18';
 let db, coins=[], certCos=[], sortK='invNo', sortD=1, curFilter='allactive',
     imgs={obv:null,rev:null,edge:null}, curSlot=null, modalId=null, scanStream=null;
 const DEFAULT_CERTCO=['PCGS','NGC','ANACS','Raw Coin'];
@@ -1028,20 +1029,30 @@ function mintageNum(c){
   const m=String(c.mintage||'').replace(/[,.\s]/g,'').match(/\d{1,12}/);
   return m?parseInt(m[0],10):null;
 }
+function rarityTier(n){
+  if(n==null)return '';
+  if(n<=100)return 'Extremely Rare';
+  if(n<=1000)return 'Very Rare';
+  if(n<=10000)return 'Rare';
+  if(n<=100000)return 'Scarce';
+  if(n<=1000000)return 'Uncommon';
+  return 'Common';
+}
 function mintageDisplay(c){
   const raw=String(c.mintage||'').trim();
   if(!raw)return '';
   const n=mintageNum(c);
   if(n==null)return raw;
-  let tier='';
-  if(n<=100)tier='Extremely Rare';
-  else if(n<=1000)tier='Very Rare';
-  else if(n<=10000)tier='Rare';
-  else if(n<=100000)tier='Scarce';
-  else if(n<=1000000)tier='Uncommon';
-  else tier='Common';
   const shown=/^\d[\d,.\s]*$/.test(raw)?n.toLocaleString():raw;
-  return shown+' · '+tier;
+  return shown+' · '+rarityTier(n);
+}
+/* Compact number for tight label real estate: 1250000 -> 1.25M, 12500 -> 12.5K */
+function mintageShort(c){
+  const n=mintageNum(c);
+  if(n==null)return '';
+  if(n>=1e6)return (Math.round(n/1e4)/100).toString().replace(/\.0+$/,'')+'M';
+  if(n>=1e3)return (Math.round(n/100)/10).toString().replace(/\.0+$/,'')+'K';
+  return String(n);
 }
 function certLookupUrl(co,cert){const m={PCGS:'https://www.pcgs.com/cert/'+cert,NGC:'https://www.ngccoin.com/certlookup/'+cert+'/',ANACS:'https://www.anacs.com/verify/?certnum='+cert};return m[co]||'';}
 /* ════════════ LIGHTBOX (dynamic pinch / wheel / drag zoom) ════════════ */
@@ -1763,6 +1774,7 @@ function renderReport(){
       <td class="mono" style="color:var(--gold-l)">${esc(c.invNo||'—')}</td>
       <td><b>${esc(c.country||'—')}</b><br><span class="hint">${esc(c.denomination||'')} ${esc(c.year||'')}</span></td>
       <td>${esc(c.variety||'—')}${c.type?`<br><span class="hint">${esc(c.type)}</span>`:''}</td>
+      <td>${c.mintage?`<span class="mono">${esc(mintageNum(c)!=null?mintageNum(c).toLocaleString():c.mintage)}</span>${rarityTier(mintageNum(c))?`<br><span class="hint">${esc(rarityTier(mintageNum(c)))}</span>`:''}`:'—'}</td>
       <td class="mono">${esc(c.mint||'—')}</td>
       <td><span class="mono">${esc(c.grade||'—')}</span>${c.certCo?`<br><span class="hint">${esc(c.certCo)}</span>`:''}</td>
       <td class="mono">${esc(c.certNum||'—')}</td>
@@ -1782,8 +1794,8 @@ function renderReport(){
       <div><div class="k" style="font-family:'JetBrains Mono';font-size:11px;color:var(--muted)">PROFIT / LOSS</div><div style="font-size:26px" class="${pl>=0?'pos':'neg'}">${pl>=0?'+':''}${money(pl)}</div></div>
     </div>
     ${fineRows?`<div class="sec"><div class="k" style="font-family:'JetBrains Mono';font-size:11px;color:var(--muted);margin-bottom:6px">FINE NOBLE-METAL CONTENT — ASW / AGW (TROY OZ)</div><div style="font-size:16px">${fineRows}</div></div>`:''}
-    <div style="overflow-x:auto"><table><thead><tr><th>Img</th><th>Inv #</th><th>Coin</th><th>Variety / Type</th><th>Mint</th><th>Grade</th><th>Cert #</th><th>Metal</th><th>Fine Oz</th><th>Cost</th><th>Value</th><th>P/L</th><th>Status</th></tr></thead><tbody>${rows}</tbody>
-    <tfoot><tr style="border-top:2px solid var(--border2)"><td></td><td></td><td><b>TOTALS</b></td><td></td><td></td><td></td><td></td><td></td><td class="mono"><b>${nobleFineTotal>0?nobleFineTotal.toFixed(4):'—'}</b></td><td class="mono"><b>${money(cost)}</b></td><td class="mono"><b>${money(val)}</b></td><td class="mono ${pl>=0?'pos':'neg'}"><b>${pl>=0?'+':''}${money(pl)}</b></td><td></td></tr></tfoot></table></div>`;
+    <div style="overflow-x:auto"><table><thead><tr><th>Img</th><th>Inv #</th><th>Coin</th><th>Variety / Type</th><th>Mintage · Rarity</th><th>Mint</th><th>Grade</th><th>Cert #</th><th>Metal</th><th>Fine Oz</th><th>Cost</th><th>Value</th><th>P/L</th><th>Status</th></tr></thead><tbody>${rows}</tbody>
+    <tfoot><tr style="border-top:2px solid var(--border2)"><td></td><td></td><td><b>TOTALS</b></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="mono"><b>${nobleFineTotal>0?nobleFineTotal.toFixed(4):'—'}</b></td><td class="mono"><b>${money(cost)}</b></td><td class="mono"><b>${money(val)}</b></td><td class="mono ${pl>=0?'pos':'neg'}"><b>${pl>=0?'+':''}${money(pl)}</b></td><td></td></tr></tfoot></table></div>`;
 }
 
 // ── Sales Ledger: proceeds and realized gain/loss on sold coins ──
@@ -1795,7 +1807,7 @@ function renderSalesLedger(list){
     return `<tr>
       <td>${th}</td>
       <td class="mono" style="color:var(--gold-l)">${esc(c.invNo||'—')}</td>
-      <td><b>${esc(c.country||'—')}</b><br><span class="hint">${esc(c.denomination||'')} ${esc(c.year||'')}</span></td>
+      <td><b>${esc(c.country||'—')}</b><br><span class="hint">${esc(c.denomination||'')} ${esc(c.year||'')}</span>${c.mintage?`<br><span class="hint">Mintage: ${esc(mintageDisplay(c))}</span>`:''}</td>
       <td><span class="mono">${esc(c.grade||'—')}</span>${c.certCo?`<br><span class="hint">${esc(c.certCo)}</span>`:''}</td>
       <td class="mono">${esc(c.certNum||'—')}</td>
       <td class="mono">${money(cs)}</td>
@@ -1827,7 +1839,7 @@ function renderInsuranceReport(list){
       <td class="mono">${i+1}</td>
       <td>${th}</td>
       <td class="mono" style="color:var(--gold-l)">${esc(c.invNo||'—')}</td>
-      <td><b>${esc(c.country||'—')}</b> ${esc(c.denomination||'')} ${esc(c.year||'')}${c.mint?`<br><span class="hint">Mint: ${esc(c.mint)}</span>`:''}${(c.type||c.variety)?`<br><span class="hint">${esc([c.type,c.variety].filter(Boolean).join(' · '))}</span>`:''}</td>
+      <td><b>${esc(c.country||'—')}</b> ${esc(c.denomination||'')} ${esc(c.year||'')}${c.mint?`<br><span class="hint">Mint: ${esc(c.mint)}</span>`:''}${(c.type||c.variety)?`<br><span class="hint">${esc([c.type,c.variety].filter(Boolean).join(' · '))}</span>`:''}${c.mintage?`<br><span class="hint">Mintage: ${esc(mintageDisplay(c))}</span>`:''}</td>
       <td><span class="mono">${esc(c.grade||'—')}</span>${c.certCo?`<br><span class="hint">${esc(c.certCo)} ${esc(c.certNum||'')}</span>`:''}</td>
       <td style="text-transform:capitalize">${esc(c.metal||'—')}${fz>0?`<br><span class="hint">${fz.toFixed(4)} ozt</span>`:''}</td>
       <td class="hint">${basis}</td>
@@ -2343,6 +2355,7 @@ const FLIP_FIELDS = [
   ['Mint',         c=>c.mint],
   ['Denomination', c=>c.denomination],
   ['Year',         c=>c.year],
+  ['Mintage',      c=>mintageDisplay(c)],
   ['Metal',        c=>c.metal],
   ['Grade',        c=>[c.grade,c.certCo].filter(Boolean).join(' ')],
   ['Cert #',       c=>c.certNum],
@@ -2427,7 +2440,7 @@ const LABEL_FORMATS = {
     card(c){
       const f=_lblFields(c);
       const svc = [f.service, c.grade].filter(Boolean).map(esc).join(' ') || '—';
-      const mid = [c.country, c.denomination, c.year].filter(Boolean).map(esc).join(' · ') || '—';
+      const mid = [c.country, c.denomination, c.year, c.mintage?('Mtg '+mintageShort(c)):''].filter(Boolean).map(esc).join(' · ') || '—';
       return `<div class="label">
         <img class="wm" src="${LABEL_LOGO}" alt="">
         <div class="txt">
@@ -2437,6 +2450,56 @@ const LABEL_FORMATS = {
           <div class="val">${f.val} <span class="pl ${f.plPos?'pos':'neg'}">${f.plCode}</span></div>
           <div class="cert">${esc(c.certNum||'—')}</div>
         </div>
+      </div>`;
+    },
+    blank(){ return `<div class="label blank"></div>`; }
+  },
+
+  'presta94226': {
+    // Avery Presta 94226 — removable, 1.75" wide × 1.25" tall, 32 per letter sheet (4 cols × 8 rows)
+    // Die-cut geometry: 0.5" top/bottom margins, 0.28125" side margins, 0.3125" column gaps, rows touch (no vertical gap)
+    name: 'Avery Presta 94226 · 1.75×1.25″',
+    cols: 4, rows: 8, total: 32,
+    aspect: '1.75/1.25',
+    css: `<style>
+      @page{size:letter;margin:0.5in 0.28125in}
+      *{box-sizing:border-box}
+      html,body{margin:0;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+      .sheet{display:grid;grid-template-columns:repeat(4,1.75in);column-gap:0.3125in;row-gap:0}
+      .label{width:1.75in;height:1.25in;overflow:hidden;padding:0.1in 0.11in 0.08in;position:relative;
+        break-inside:avoid;page-break-inside:avoid;font-family:Arial,Helvetica,sans-serif;color:#000;
+        display:flex;flex-direction:column}
+      .label .wm{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+        width:92%;height:92%;object-fit:contain;opacity:0.34;z-index:0;pointer-events:none}
+      .label > *{position:relative;z-index:1}
+      .label .inv{font-size:15px;font-weight:900;letter-spacing:.4px;color:#000;line-height:1.0;
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:1px}
+      .label .svc{font-size:10px;font-weight:800;letter-spacing:.2px;white-space:nowrap;overflow:hidden;
+        text-overflow:ellipsis;margin-top:1px}
+      .label .mid{font-size:9px;font-weight:700;line-height:1.2;margin-top:1px;overflow:hidden;color:#111;
+        display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+      .label .sub{font-size:8px;font-weight:600;line-height:1.15;margin-top:1px;white-space:nowrap;
+        overflow:hidden;text-overflow:ellipsis;color:#333}
+      .label .val{font-size:9.5px;font-weight:800;margin-top:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#000}
+      .label .val .pl{font-weight:900}
+      .label .val .pl.pos{color:#0a6b22}.label .val .pl.neg{color:#9e1b14}
+      .label .cert{font-size:8px;font-weight:700;font-family:'Courier New',monospace;white-space:nowrap;overflow:hidden;
+        text-overflow:ellipsis;margin-top:1px;color:#222}
+      .label.blank{border:none;background:none}
+    </style>`,
+    card(c){
+      const f=_lblFields(c);
+      const svc = [f.service, c.grade].filter(Boolean).map(esc).join(' ') || '—';
+      const mid = [c.country, c.denomination, c.year].filter(Boolean).map(esc).join(' · ') || '—';
+      const sub = [c.mint?('Mint '+c.mint):'', c.variety, c.mintage?('Mtg '+mintageShort(c)+(rarityTier(mintageNum(c))?' · '+rarityTier(mintageNum(c)):'')):''].filter(Boolean).map(esc).join(' · ');
+      return `<div class="label">
+        <img class="wm" src="${LABEL_LOGO}" alt="">
+        ${c.invNo?`<div class="inv">${esc(c.invNo)}</div>`:''}
+        <div class="svc">${svc}</div>
+        <div class="mid">${mid}</div>
+        ${sub?`<div class="sub">${sub}</div>`:''}
+        <div class="val">${f.val} <span class="pl ${f.plPos?'pos':'neg'}">${f.plCode}</span></div>
+        <div class="cert">${esc(c.certNum||'—')}</div>
       </div>`;
     },
     blank(){ return `<div class="label blank"></div>`; }
@@ -2474,7 +2537,7 @@ const LABEL_FORMATS = {
     card(c){
       const f=_lblFields(c);
       const svc = [f.service, c.grade].filter(Boolean).map(esc).join(' ') || '—';
-      const mid = [c.country, c.denomination, c.year].filter(Boolean).map(esc).join(' · ') || '—';
+      const mid = [c.country, c.denomination, c.year, c.mintage?('Mtg '+mintageShort(c)):''].filter(Boolean).map(esc).join(' · ') || '—';
       return `<div class="label">
         <img class="wm" src="${LABEL_LOGO}" alt="">
         ${c.invNo?`<div class="inv">${esc(c.invNo)}</div>`:''}
@@ -2521,7 +2584,7 @@ const LABEL_FORMATS = {
     card(c){
       const f=_lblFields(c);
       const svc = [f.service, c.grade].filter(Boolean).map(esc).join(' ') || '—';
-      const mid = [c.country, c.denomination, c.year].filter(Boolean).map(esc).join(' · ') || '—';
+      const mid = [c.country, c.denomination, c.year, c.mintage?('Mtg '+mintageShort(c)):''].filter(Boolean).map(esc).join(' · ') || '—';
       return `<div class="label">
         <img class="wm" src="${LABEL_LOGO}" alt="">
         ${c.invNo?`<div class="inv">${esc(c.invNo)}</div>`:''}
@@ -2749,8 +2812,6 @@ async function printLabels(ids){
     const missing=chosen.filter(c=>!c.certNum).length;
     if(missing && !confirm(`${missing} of ${chosen.length} selected coin(s) have no certificate number.\n\nThese labels are designed for certified (PCGS/NGC) coins. Print anyway?`)) return;
   }
-  const order=[..._invFilteredIds];
-  chosen.sort((a,b)=>order.indexOf(a.id)-order.indexOf(b.id));
   const off=await averyPick(chosen.length, fmtKey);
   if(off===null) return;
   await printHTML(buildLabelsHTML(chosen, off, fmtKey, mode));
