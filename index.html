@@ -673,7 +673,7 @@ tr.row.sel td{background:rgba(201,168,76,.12)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js"></script>
 <script>
 /* ════════════ STATE ════════════ */
-const APP_VERSION='v2.8 · 2026-07-19';
+const APP_VERSION='v2.9 · 2026-07-19';
 let db, coins=[], certCos=[], sortK='invNo', sortD=1, curFilter='allactive',
     imgs={obv:null,rev:null,edge:null}, curSlot=null, modalId=null, scanStream=null;
 const DEFAULT_CERTCO=['PCGS','NGC','ANACS','Raw Coin'];
@@ -2467,15 +2467,16 @@ const LABEL_FORMATS = {
 
   'presta94226': {
     // Avery Presta 94226 — removable, 1.75" wide × 1.25" tall, 32 per letter sheet (4 cols × 8 rows)
-    // Die-cut geometry: 0.5" top/bottom margins, 0.28125" side margins, 0.3125" column gaps, rows touch (no vertical gap)
+    // Die-cut geometry from Avery's official 94226 PDF template: 0.5" top margin,
+    // 0.46875" side margins, 0.1875" column gaps (1.9375" pitch), rows touch (1.25" pitch)
     name: 'Avery Presta 94226 · 1.75×1.25″',
     cols: 4, rows: 8, total: 32,
     aspect: '1.75/1.25',
     css: `<style>
-      @page{size:letter;margin:0.5in 0.28125in 0.2in 0.28125in}
+      @page{size:letter;margin:0.5in 0.46875in 0.2in 0.46875in}
       *{box-sizing:border-box}
       html,body{margin:0;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-      .sheet{display:grid;grid-template-columns:repeat(4,1.75in);column-gap:0.3125in;row-gap:0}
+      .sheet{display:grid;grid-template-columns:repeat(4,1.75in);column-gap:0.1875in;row-gap:0}
       .label{width:1.75in;height:1.25in;overflow:hidden;padding:0.1in 0.11in 0.08in;position:relative;
         break-inside:avoid;page-break-inside:avoid;font-family:Arial,Helvetica,sans-serif;color:#000;
         display:flex;flex-direction:column}
