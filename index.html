@@ -570,9 +570,10 @@ tr.row.sel td{background:rgba(201,168,76,.12)}
 
   <div class="sec">
     <div class="sec-t">💾 Backup & Restore</div>
-    <div class="hint" style="margin-bottom:12px">Exports all coins (with photos) into one .json backup file you can save anywhere or move between devices. On iPhone, backups save to the Files app (Downloads); to restore, tap Restore Backup and pick the backup file from Files. Older .mxreg backups restore fine too.</div>
+    <div class="hint" style="margin-bottom:12px">Full Backup includes photos (large file); Data Backup is coin data only — typically under 1 MB, ideal for frequent Mac ↔ iPhone syncing. Restoring a Data Backup updates records but never removes photos already on the device. Store backups in iCloud Drive via the Files app — do NOT commit them to the GitHub repository: browser uploads there are limited to 25 MB, and the repo is public, which would expose your collection data. Older .mxreg backups restore fine too.</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
-      <button class="btn btn-s" onclick="backupDB()">⬇ Export Backup</button>
+      <button class="btn btn-s" onclick="backupDB(true)">⬇ Full Backup (photos)</button>
+      <button class="btn btn-s" onclick="backupDB(false)">⬇ Data Backup (small)</button>
       <button class="btn btn-s" onclick="document.getElementById('restore-inp').click()">⬆ Restore Backup</button>
       <input type="file" id="restore-inp" style="display:none" onchange="restoreDB(event)">
     </div>
@@ -673,7 +674,7 @@ tr.row.sel td{background:rgba(201,168,76,.12)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js"></script>
 <script>
 /* ════════════ STATE ════════════ */
-const APP_VERSION='v2.9 · 2026-07-19';
+const APP_VERSION='v2.10 · 2026-07-26';
 let db, coins=[], certCos=[], sortK='invNo', sortD=1, curFilter='allactive',
     imgs={obv:null,rev:null,edge:null}, curSlot=null, modalId=null, scanStream=null;
 const DEFAULT_CERTCO=['PCGS','NGC','ANACS','Raw Coin'];
@@ -1978,11 +1979,14 @@ async function exportReportPDF(){
 }
 
 /* ════════════ BACKUP ════════════ */
-async function backupDB(){
-  const data={app:'MX Registry',version:1,exported:new Date().toISOString(),coins:await dbAll('coins'),certCos,spots:SP};
+async function backupDB(includePhotos=true){
+  let all=await dbAll('coins');
+  if(!includePhotos)all=all.map(c=>({...c,imgObv:null,imgRev:null,imgEdge:null}));
+  const data={app:'MX Registry',version:1,exported:new Date().toISOString(),photos:!!includePhotos,coins:all,certCos,spots:SP};
   const blob=new Blob([JSON.stringify(data)],{type:'application/json'});
-  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='MXRegistry_backup_'+new Date().toISOString().split('T')[0]+'.json';a.click();
-  toast('Backup exported');
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download='MXRegistry_'+(includePhotos?'backup_':'data_')+new Date().toISOString().split('T')[0]+'.json';a.click();
+  toast(includePhotos?'Full backup exported':'Data backup exported ('+(blob.size/1024).toFixed(0)+' KB)');
 }
 function restoreDB(e){
   const f=e.target.files[0];if(!f)return;
@@ -1996,8 +2000,16 @@ function restoreDB(e){
     try{
       if(!d.coins||!Array.isArray(d.coins))throw new Error('no coins found in file');
       if(!confirm('Restore '+d.coins.length+' coins from backup dated '+(d.exported?d.exported.split('T')[0]:'unknown')+'? This merges into your current data.'))return;
+      const have={};coins.forEach(c=>have[c.id]=c);
       let n=0;
       for(const c of d.coins){
+        const ex=have[c.id];
+        /* photo-preserving merge: a data-only backup must never wipe photos already on this device */
+        if(ex){
+          if(!c.imgObv&&ex.imgObv)c.imgObv=ex.imgObv;
+          if(!c.imgRev&&ex.imgRev)c.imgRev=ex.imgRev;
+          if(!c.imgEdge&&ex.imgEdge)c.imgEdge=ex.imgEdge;
+        }
         await dbPut('coins',c);n++;
         if(n%100===0)toast('Restoring… '+n+' / '+d.coins.length);
       }
