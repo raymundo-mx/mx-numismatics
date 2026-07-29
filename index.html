@@ -674,7 +674,7 @@ tr.row.sel td{background:rgba(201,168,76,.12)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js"></script>
 <script>
 /* ════════════ STATE ════════════ */
-const APP_VERSION='v2.11 · 2026-07-27';
+const APP_VERSION='v2.12 · 2026-07-29';
 let db, coins=[], certCos=[], sortK='invNo', sortD=1, curFilter='allactive',
     imgs={obv:null,rev:null,edge:null}, curSlot=null, modalId=null, scanStream=null;
 const DEFAULT_CERTCO=['PCGS','NGC','ANACS','Raw Coin'];
@@ -1988,66 +1988,89 @@ async function backupDB(includePhotos=true){
   a.download='MXRegistry_'+(includePhotos?'backup_':'data_')+new Date().toISOString().split('T')[0]+'.json';a.click();
   toast(includePhotos?'Full backup exported':'Data backup exported ('+(blob.size/1024).toFixed(0)+' KB)');
 }
-/* ── Incremental restore ──
-   Parsing a 50+ MB backup with JSON.parse builds the whole object tree in memory at once,
-   which exceeds iOS WebKit's memory ceiling and crashes the PWA ("A problem repeatedly
-   occurred"). Instead we scan the raw text and parse ONE coin at a time, yielding to the
-   event loop between batches. Peak memory: file text + a single coin. */
-async function _scanCoinSpans(text, from){
-  const spans=[];
-  let i=from, depth=0, inStr=false, escp=false, start=-1;
-  for(; i<text.length; i++){
-    const ch=text[i];
-    if(inStr){ if(escp)escp=false; else if(ch==='\\')escp=true; else if(ch==='"')inStr=false; }
-    else if(ch==='"')inStr=true;
-    else if(ch==='{'){ if(depth===0)start=i; depth++; }
-    else if(ch==='}'){ depth--; if(depth===0&&start>=0){ spans.push([start,i+1]); start=-1; } }
-    else if(ch===']'&&depth===0)return {spans, end:i};
-    if((i-from)%2000000===1999999)await new Promise(r=>setTimeout(r,0)); /* keep iOS watchdog happy on big files */
-  }
-  return {spans, end:i};
-}
-function restoreDB(e){
-  const f=e.target.files[0];if(!f)return;
-  toast('Reading backup… ('+(f.size/1048576).toFixed(1)+' MB)');
-  const r=new FileReader();
-  r.onerror=()=>toast('Could not read the file — try again');
-  r.onload=async ev=>{
-    const text=ev.target.result;
-    try{
-      const ci=text.indexOf('"coins":[');
-      if(ci<0||text.indexOf('MX Registry')<0)throw new Error('not a valid MX Registry backup file');
-      const em=text.slice(0,ci).match(/"exported":"([^"]+)"/);
-      const exported=em?em[1].split('T')[0]:'unknown';
-      toast('Scanning backup…');
-      const {spans}=await _scanCoinSpans(text, ci+9);
-      if(!spans.length)throw new Error('no coins found in file');
-      if(!confirm('Restore '+spans.length+' coins from backup dated '+exported+'? This merges into your current data.'))return;
-      const have={};coins.forEach(c=>have[c.id]=c);
-      for(let k=0;k<spans.length;k++){
-        const c=JSON.parse(text.slice(spans[k][0],spans[k][1]));
-        const ex=have[c.id];
-        /* photo-preserving merge: a data-only backup must never wipe photos already on this device */
-        if(ex){
-          if(!c.imgObv&&ex.imgObv)c.imgObv=ex.imgObv;
-          if(!c.imgRev&&ex.imgRev)c.imgRev=ex.imgRev;
-          if(!c.imgEdge&&ex.imgEdge)c.imgEdge=ex.imgEdge;
+/* ── Streaming restore ──
+   Backups now reach hundreds of MB (photos). Reading the whole file into a JS string
+   (~2 bytes/char) exceeds iOS WebKit's memory ceiling and the PWA gets killed before a
+   single coin is written. So we stream: read 4 MB Blob slices, decode incrementally,
+   run a persistent scanner across slice boundaries, and hold at most ONE coin's text
+   in memory. Peak memory is flat regardless of backup size. */
+async function restoreDB(e){
+  const f=e.target.files[0];if(!f)return;e.target.value='';
+  const mb=(f.size/1048576).toFixed(1);
+  if(!confirm('Restore backup "'+f.name+'" ('+mb+' MB)? This merges into your current data.'))return;
+  toast('Restoring from '+mb+' MB backup…');
+  const CHUNK=4*1024*1024;
+  const dec=new TextDecoder();
+  const have={};coins.forEach(c=>have[c.id]=c);
+  let phase=0;            /* 0 = seeking "coins":[ in header · 1 = scanning coin objects · 2 = tail */
+  let head='', tail='';
+  let depth=0, inStr=false, escp=false;
+  let buf='', n=0, photosIn=0;
+  try{
+    for(let off=0; off<f.size; off+=CHUNK){
+      const chunk=dec.decode(await f.slice(off, off+CHUNK).arrayBuffer(), {stream: off+CHUNK<f.size});
+      let i=0;
+      if(phase===0){
+        head+=chunk;
+        const ci=head.indexOf('"coins":[');
+        if(ci<0){
+          if(head.length>131072)throw new Error('not a valid MX Registry backup file');
+          continue;
         }
-        await dbPut('coins',c);
-        if(k%25===24){ toast('Restoring… '+(k+1)+' / '+spans.length); await new Promise(r2=>setTimeout(r2,0)); }
+        if(head.slice(0,ci).indexOf('MX Registry')<0)throw new Error('not a valid MX Registry backup file');
+        /* switch to scanning just past the array opener; reuse head remainder as the working text */
+        const rest=head.slice(ci+9); head=head.slice(0,ci);
+        phase=1;
+        i=0;
+        var text=rest;   /* falls through to scanner below */
+      } else {
+        var text=chunk;
       }
-      const ccm=text.slice(0,ci).match(/"certCos":(\[[^\]]*\])/)||text.slice(spans[spans.length-1][1]).match(/"certCos":(\[[^\]]*\])/);
-      if(ccm){ try{ const cc=JSON.parse(ccm[1]); certCos=[...new Set([...certCos,...cc])]; await dbPut('meta',{key:'certCos',val:certCos}); }catch(_){} }
-      coins=await dbAll('coins');
-      /* re-sync the MX number counter to the restored data — prevents duplicate MX numbers later */
-      const m=await dbGet('meta','invSeq');
-      const mx=maxInvNum();
-      if(!m||m.val<mx)await dbPut('meta',{key:'invSeq',val:mx});
-      fillCertCoSelect();renderCertCoList();renderTable();renderDash();
-      toast('Restored '+spans.length+' coins ✓');
-    }catch(err){toast('Restore failed: '+err.message);}
-  };
-  r.readAsText(f);e.target.value='';
+      if(phase===1){
+        let seg=-1;
+        for(; i<text.length; i++){
+          const ch=text[i];
+          if(inStr){ if(escp)escp=false; else if(ch==='\\')escp=true; else if(ch==='"')inStr=false; continue; }
+          if(ch==='"'){ if(depth>0)inStr=true; continue; }
+          if(ch==='{'){ if(depth===0)seg=i; depth++; continue; }
+          if(ch==='}'){
+            depth--;
+            if(depth===0){
+              buf+=text.slice(seg<0?0:seg, i+1); seg=-1;
+              const c=JSON.parse(buf); buf='';
+              const ex=have[c.id];
+              /* photo-preserving merge: photo-less records never wipe photos on this device */
+              if(ex){
+                if(!c.imgObv&&ex.imgObv)c.imgObv=ex.imgObv;
+                if(!c.imgRev&&ex.imgRev)c.imgRev=ex.imgRev;
+                if(!c.imgEdge&&ex.imgEdge)c.imgEdge=ex.imgEdge;
+              }
+              if(c.imgObv||c.imgRev||c.imgEdge)photosIn++;
+              await dbPut('coins',c); n++;
+              if(n%20===0){ toast('Restoring… '+n+' coins ('+Math.round(100*(off+i)/f.size)+'%)'); await new Promise(r=>setTimeout(r,0)); }
+            }
+            continue;
+          }
+          if(ch===']'&&depth===0){ phase=2; tail=text.slice(i); break; }
+        }
+        if(phase===1&&depth>0&&seg>=0)buf+=text.slice(seg);          /* coin straddles chunk boundary */
+        else if(phase===1&&depth>0&&seg<0)buf+=text;                  /* continuing a straddling coin */
+      } else if(phase===2){
+        if(tail.length<65536)tail+=text;
+      }
+      await new Promise(r=>setTimeout(r,0));                          /* keep the iOS watchdog happy per chunk */
+    }
+    if(!n)throw new Error('no coins found in file');
+    const ccm=tail.match(/"certCos":(\[[^\]]*\])/);
+    if(ccm){ try{ const cc=JSON.parse(ccm[1]); certCos=[...new Set([...certCos,...cc])]; await dbPut('meta',{key:'certCos',val:certCos}); }catch(_){} }
+    coins=await dbAll('coins');
+    /* re-sync the MX number counter to the restored data — prevents duplicate MX numbers later */
+    const m=await dbGet('meta','invSeq');
+    const mx=maxInvNum();
+    if(!m||m.val<mx)await dbPut('meta',{key:'invSeq',val:mx});
+    fillCertCoSelect();renderCertCoList();renderTable();renderDash();
+    toast('Restored '+n+' coins ✓ ('+photosIn+' with photos)');
+  }catch(err){toast('Restore failed: '+err.message);}
 }
 
 /* ════════════ PCGS CSV IMPORT ════════════ */
