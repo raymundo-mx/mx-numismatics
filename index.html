@@ -674,7 +674,7 @@ tr.row.sel td{background:rgba(201,168,76,.12)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js"></script>
 <script>
 /* ════════════ STATE ════════════ */
-const APP_VERSION='v2.12 · 2026-07-29';
+const APP_VERSION='v2.13 · 2026-07-29';
 let db, coins=[], certCos=[], sortK='invNo', sortD=1, curFilter='allactive',
     imgs={obv:null,rev:null,edge:null}, curSlot=null, modalId=null, scanStream=null;
 const DEFAULT_CERTCO=['PCGS','NGC','ANACS','Raw Coin'];
@@ -692,13 +692,36 @@ function openDB(){return new Promise((res,rej)=>{
     if(!d.objectStoreNames.contains('coins'))d.createObjectStore('coins',{keyPath:'id'});
     if(!d.objectStoreNames.contains('meta'))d.createObjectStore('meta',{keyPath:'key'});
   };
-  r.onsuccess=e=>{db=e.target.result;res();};
+  r.onsuccess=e=>{
+    db=e.target.result;
+    /* iOS closes idle IndexedDB connections when the PWA is backgrounded — track it so ops reopen */
+    db.onclose=()=>{db=null;};
+    db.onversionchange=()=>{try{db.close();}catch(_){}db=null;};
+    res(db);
+  };
   r.onerror=e=>rej(e.target.error);
 });}
-const dbAll=s=>new Promise((r,j)=>{const q=db.transaction(s,'readonly').objectStore(s).getAll();q.onsuccess=()=>r(q.result);q.onerror=()=>j(q.error);});
-const dbGet=(s,k)=>new Promise((r,j)=>{const q=db.transaction(s,'readonly').objectStore(s).get(k);q.onsuccess=()=>r(q.result);q.onerror=()=>j(q.error);});
-const dbPut=(s,o)=>new Promise((r,j)=>{const q=db.transaction(s,'readwrite').objectStore(s).put(o);q.onsuccess=()=>r(q.result);q.onerror=()=>j(q.error);});
-const dbDel=(s,k)=>new Promise((r,j)=>{const q=db.transaction(s,'readwrite').objectStore(s).delete(k);q.onsuccess=()=>r();q.onerror=()=>j(q.error);});
+async function _db(){ return db || openDB(); }
+/* Self-healing op wrapper: if the connection was closed (backgrounded PWA), reopen and retry once */
+function _op(fn){
+  return (async()=>{
+    for(let attempt=0;attempt<2;attempt++){
+      const d=await _db();
+      try{ return await fn(d); }
+      catch(err){
+        const msg=String((err&&(err.message||err.name))||'');
+        if(attempt===0&&/closing|closed|InvalidState/i.test(msg)){ db=null; continue; }
+        throw err;
+      }
+    }
+  })();
+}
+const dbAll=s=>_op(d=>new Promise((r,j)=>{const q=d.transaction(s,'readonly').objectStore(s).getAll();q.onsuccess=()=>r(q.result);q.onerror=()=>j(q.error);}));
+const dbGet=(s,k)=>_op(d=>new Promise((r,j)=>{const q=d.transaction(s,'readonly').objectStore(s).get(k);q.onsuccess=()=>r(q.result);q.onerror=()=>j(q.error);}));
+const dbPut=(s,o)=>_op(d=>new Promise((r,j)=>{const q=d.transaction(s,'readwrite').objectStore(s).put(o);q.onsuccess=()=>r(q.result);q.onerror=()=>j(q.error);}));
+const dbDel=(s,k)=>_op(d=>new Promise((r,j)=>{const q=d.transaction(s,'readwrite').objectStore(s).delete(k);q.onsuccess=()=>r();q.onerror=()=>j(q.error);}));
+/* proactive reconnect when the PWA returns to the foreground */
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'&&!db)openDB().catch(()=>{}); });
 
 /* ════════════ INIT ════════════ */
 async function init(){
