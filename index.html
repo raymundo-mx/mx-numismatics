@@ -566,6 +566,7 @@ tr.row.sel td{background:rgba(201,168,76,.12)}
     <div class="sec-t">🛠 Maintenance</div>
     <div class="hint" style="margin-bottom:12px">Scans for coins sharing the same MX inventory number. The oldest coin keeps its number; later ones (e.g. from an import) are assigned fresh MX numbers continuing after the highest in use.</div>
     <button class="btn btn-s" onclick="fixDupInvNos()">🔢 Fix Duplicate MX Numbers</button>
+    <button class="btn btn-s" onclick="recompressPhotos()">🗜 Recompress Photos</button>
   </div>
 
   <div class="sec">
@@ -674,7 +675,7 @@ tr.row.sel td{background:rgba(201,168,76,.12)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js"></script>
 <script>
 /* ════════════ STATE ════════════ */
-const APP_VERSION='v3.0 · 2026-07-29';
+const APP_VERSION='v3.1 · 2026-07-30';
 let db, coins=[], certCos=[], sortK='invNo', sortD=1, curFilter='allactive',
     imgs={obv:null,rev:null,edge:null}, curSlot=null, modalId=null, scanStream=null;
 const DEFAULT_CERTCO=['PCGS','NGC','ANACS','Raw Coin'];
@@ -770,6 +771,29 @@ async function migrateImages(){
   await dbPut('meta',{key:'imgSplit',val:1});
   if(ids.length)toast('Photo storage optimized ✓');
 }
+/* Retroactive recompression: shrink already-stored photos to the current standard, one at a time */
+async function recompressPhotos(){
+  if(!confirm('Recompress all stored photos to the current standard (max 1280px)? Larger originals are replaced with lighter versions. Export a Full Backup first if you want to archive the originals.'))return;
+  let before=0,after=0,done=0,shrunk=0;
+  const jobs=[];coins.forEach(c=>IMG_SIDES.forEach(sd=>jobs.push([c,sd])));
+  for(const [c,sd] of jobs){
+    const full=await dbGetImg(c.id,sd); if(!full)continue;
+    done++; before+=full.length;
+    const nu=await compressPhoto(full);
+    const keep=nu.length>=full.length*0.95;         /* already tight — keep the original */
+    after+=keep?full.length:nu.length;
+    if(!keep){
+      await dbPutImg(c.id,sd,nu);
+      const th=await makeThumb(nu);
+      if(th){c[_thKey(sd)]=th;await dbPut('coins',c);}
+      shrunk++;
+    }
+    if(done%5===0){toast('Recompressing… '+done+' photos');await new Promise(r=>setTimeout(r,0));}
+  }
+  renderTable();renderDash();
+  toast(done?('Recompressed '+shrunk+' of '+done+' photos: '+(before/1048576).toFixed(0)+' MB → '+(after/1048576).toFixed(0)+' MB ✓'):'No photos found');
+}
+
 /* Lazy thumbnail backfill: builds missing thumbs in the background, one image at a time */
 let _bfRunning=false;
 async function backfillThumbs(){
@@ -1351,7 +1375,7 @@ function handleImg(e, slot) {
   if (!f) return;
   const r = new FileReader();
   r.onload = ev => {
-    compress(ev.target.result, 1400, d => {
+    compressPhoto(ev.target.result).then(d => {
       imgs[slot] = d;
       setSlot(slot, d);
     });
@@ -1484,7 +1508,7 @@ function webcamSnap() {
   canvas.height = video.videoHeight;
   canvas.getContext('2d').drawImage(video, 0, 0);
   const dataUrl = canvas.toDataURL('image/jpeg', 0.90);
-  compress(dataUrl, 1600, d => {
+  compressPhoto(dataUrl).then(d => {
     imgs[curSlot] = d;
     setSlot(curSlot, d);
   });
@@ -1502,7 +1526,22 @@ function webcamClose() {
   if (video) video.srcObject = null;
 }
 function clearImg(e,s){e.stopPropagation();imgs[s]=null;setSlot(s,null);}
-function compress(dataUrl,maxW,cb){const img=new Image();img.onload=()=>{let{width:w,height:h}=img;if(w>maxW){h=h*maxW/w;w=maxW;}const cv=document.createElement('canvas');cv.width=w;cv.height=h;cv.getContext('2d').drawImage(img,0,0,w,h);cb(cv.toDataURL('image/jpeg',0.82));};img.src=dataUrl;}
+/* Photo storage standard: max 1280px long edge, JPEG q0.80 — coin detail stays crisp on any
+   screen while files run ~30-40% lighter than the old 1400-1600px/0.82-0.90 mix. */
+const IMG_MAX=1280, IMG_Q=0.80;
+function compressPhoto(dataUrl){return new Promise(res=>{
+  const img=new Image();
+  img.onload=()=>{try{
+    let w=img.width,h=img.height;
+    const sc=Math.min(1,IMG_MAX/Math.max(w,h));
+    w=Math.max(1,Math.round(w*sc));h=Math.max(1,Math.round(h*sc));
+    const cv=document.createElement('canvas');cv.width=w;cv.height=h;
+    cv.getContext('2d').drawImage(img,0,0,w,h);
+    res(cv.toDataURL('image/jpeg',IMG_Q));
+  }catch(_){res(dataUrl);}};
+  img.onerror=()=>res(dataUrl);
+  img.src=dataUrl;
+});}
 
 const MINT_MARKS=[
   ['','— none / select —'],
