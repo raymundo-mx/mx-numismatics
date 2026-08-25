@@ -272,7 +272,7 @@ tr.row.sel td{background:rgba(201,168,76,.12)}
       </optgroup>
       <optgroup label="Flip inserts (75# card stock)">
         <option value="flip2">Flip insert · 2×2″ (1.875″)</option>
-        <option value="flip25">Flip insert · 2.5×2.5″ (2.375″)</option>
+        <option value="flip25">Flip insert · 2.5×2.5″ (50×50 mm)</option>
       </optgroup>
     </select>
     <span id="flip-mode-wrap">
@@ -675,7 +675,7 @@ tr.row.sel td{background:rgba(201,168,76,.12)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js"></script>
 <script>
 /* ════════════ STATE ════════════ */
-const APP_VERSION='v3.1 · 2026-07-30';
+const APP_VERSION='v3.2 · 2026-07-30';
 let db, coins=[], certCos=[], sortK='invNo', sortD=1, curFilter='allactive',
     imgs={obv:null,rev:null,edge:null}, curSlot=null, modalId=null, scanStream=null;
 const DEFAULT_CERTCO=['PCGS','NGC','ANACS','Raw Coin'];
@@ -2855,13 +2855,14 @@ const LABEL_FORMATS = {
   },
 
   'flip25': {
-    // Insert for 2.5×2.5 SuperSafe flip — insert = flip − 1/8" = 2.375" square
-    // 3 cols × 4 rows = 12 per letter sheet (exact-fit margins, printed at full insert size) · 75# card stock
-    name: 'Flip insert · 2.5×2.5″ (2.375″)',
+    // Insert for 2.5×2.5 SuperSafe flip — cell sized EXACTLY 50×50 mm to match the user's die cutter.
+    // 3 cols × 4 rows = 12 per letter sheet. Grid 162×218 mm on a 215.9×279.4 mm page:
+    // side margins 26.95 mm, top 25 mm, bottom 12 mm (≈24 mm slack — no last-row bleed), gaps 6 mm.
+    name: 'Flip insert · 2.5×2.5″ (50×50 mm)',
     cols: 3, rows: 4, total: 12,
-    aspect: '1/1', isFlip: true, insertIn: 2.375,
-    css: flipCSS(2.375, 3, '0.5625in 0.5625in 0.2in 0.5625in', '0.125in'),
-    card(c, mode){ return flipCard(c, mode, 2.375); },
+    aspect: '1/1', isFlip: true, insertIn: 1.9685,
+    css: flipCSS(1.9685, 3, '25mm 26.95mm 12mm 26.95mm', '6mm'),
+    card(c, mode){ return flipCard(c, mode, 1.9685); },
     blank(){ return `<div class="label blank"></div>`; }
   }
 };
@@ -3060,12 +3061,10 @@ async function printLabels(ids){
   }
   /* Blank write-on mode: no coin data needed — print N generic templates */
   if(mode==='blank'){
-    let n=chosen.length;
-    if(!n){
-      const q=prompt('How many blank write-on labels?', fmt.total);
-      if(q===null) return;
-      n=Math.max(1, Math.min(fmt.total*10, parseInt(q,10)||fmt.total));
-    }
+    const def=chosen.length||fmt.total;
+    const q=prompt('How many blank write-on '+(fmt.isFlip?'inserts':'labels')+'?\n('+fmt.total+' per page — e.g. '+fmt.total+' = 1 full page, '+(fmt.total*2)+' = 2 pages, or any smaller number for a partial page)', def);
+    if(q===null) return;
+    const n=Math.max(1, Math.min(fmt.total*20, parseInt(q,10)||def));
     const off=await averyPick(n, fmtKey);
     if(off===null) return;
     await printHTML(buildLabelsHTML(Array.from({length:n},()=>({})), off, fmtKey, 'blank'));
