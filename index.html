@@ -675,7 +675,7 @@ tr.row.sel td{background:rgba(201,168,76,.12)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js"></script>
 <script>
 /* ════════════ STATE ════════════ */
-const APP_VERSION='v3.2 · 2026-07-30';
+const APP_VERSION='v3.3 · 2026-07-31';
 let db, coins=[], certCos=[], sortK='invNo', sortD=1, curFilter='allactive',
     imgs={obv:null,rev:null,edge:null}, curSlot=null, modalId=null, scanStream=null;
 const DEFAULT_CERTCO=['PCGS','NGC','ANACS','Raw Coin'];
@@ -3041,6 +3041,75 @@ function popupHelp(){
 }
 
 /* ── Print labels: gather checked coins, then visual sheet picker ── */
+/* ── Avery Presta 94226 via PDF ──
+   Browser print engines (especially iOS AirPrint) silently scale web pages a few percent to fit
+   printer hard margins; on a die-cut sheet that compounds across columns and rows and the labels
+   drift off their cutouts. A PDF places every label at absolute coordinates from Avery's own
+   template (margins 0.46875"/0.5", pitch 1.9375" × 1.25") and prints 1:1. */
+async function printPrestaPDF(items, startOffset, mode){
+  toast('Generating label PDF…');
+  await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+  const {jsPDF}=window.jspdf;
+  const doc=new jsPDF('p','in','letter');
+  const L=0.46875, T=0.5, W=1.75, H=1.25, PX=1.9375, PY=1.25, TOTAL=32;
+  const off=Math.max(0,Math.min(TOTAL-1,parseInt(startOffset,10)||0));
+  const gs=o=>{try{doc.saveGraphicsState();doc.setGState(new doc.GState({opacity:o}));}catch(_){}}
+  const gr=()=>{try{doc.restoreGraphicsState();}catch(_){}};
+  const clip1=(t,maxW,fs)=>{doc.setFontSize(fs);const a=doc.splitTextToSize(String(t||''),maxW);return a.length?a[0]:'';};
+  for(let i=0;i<items.length;i++){
+    const idx=off+i, page=Math.floor(idx/TOTAL), cell=idx%TOTAL;
+    if(cell===0&&idx>0&&i>0)doc.addPage();
+    else if(page>0&&i===0)for(let p=0;p<page;p++)doc.addPage();
+    const col=cell%4, row=Math.floor(cell/4);
+    const x=L+col*PX, y=T+row*PY;
+    /* watermark */
+    gs(0.34);
+    try{doc.addImage(LABEL_LOGO,'PNG',x+W*0.06,y+H*0.10,W*0.88,H*0.80,undefined,'FAST');}catch(_){}
+    gr();
+    const c=items[i]||{};
+    if(mode==='blank'){
+      const rows=['MX #','Country','Denomination · Year','Mint · Variety','Grade · Cert #','Mintage','Value'];
+      doc.setTextColor(60);doc.setFont('helvetica','bold');
+      for(let r=0;r<rows.length;r++){
+        const yy=y+0.155+r*((H-0.24)/(rows.length-1)*0.92);
+        doc.setFontSize(5.5);
+        doc.text(rows[r],x+0.10,yy);
+        const lw=doc.getTextWidth(rows[r])+0.05;
+        doc.setDrawColor(85);doc.setLineWidth(0.008);
+        doc.line(x+0.10+lw,yy+0.005,x+W-0.10,yy+0.005);
+      }
+      continue;
+    }
+    const f=_lblFields(c);
+    const tw=W-0.20;
+    doc.setTextColor(0);
+    doc.setFont('helvetica','bold');doc.setFontSize(11);
+    if(c.invNo)doc.text(clip1(c.invNo,tw,11),x+0.10,y+0.185);
+    doc.setFontSize(7);
+    doc.text(clip1([f.service,c.grade].filter(Boolean).join(' ')||'—',tw,7),x+0.10,y+0.295);
+    doc.setFontSize(6.5);
+    const mid=[c.country,c.denomination,c.year].filter(Boolean).join(' · ')||'—';
+    const midL=doc.splitTextToSize(mid,tw).slice(0,2);
+    doc.text(midL,x+0.10,y+0.395);
+    let yy=y+0.395+midL.length*0.085;
+    doc.setFont('helvetica','normal');doc.setFontSize(6);doc.setTextColor(45);
+    const sub=[c.mint?('Mint '+c.mint):'',c.variety].filter(Boolean).join(' · ');
+    if(sub){doc.text(clip1(sub,tw,6),x+0.10,yy);yy+=0.085;}
+    if(c.mintage){doc.text(clip1('Mtg '+mintageDisplay(c),tw,6),x+0.10,yy);}
+    doc.setTextColor(0);doc.setFont('helvetica','bold');doc.setFontSize(7);
+    const vtxt=f.val+' ';
+    doc.text(clip1(vtxt,tw*0.7,7),x+0.10,y+H-0.205);
+    const vw=doc.getTextWidth(vtxt);
+    doc.setTextColor(f.plPos?10:158, f.plPos?107:27, f.plPos?34:20);
+    doc.text(String(f.plCode||''),x+0.10+vw,y+H-0.205);
+    doc.setTextColor(30);doc.setFont('courier','bold');doc.setFontSize(6);
+    doc.text(clip1(c.certNum||'—',tw,6),x+0.10,y+H-0.105);
+    doc.setFont('helvetica','normal');
+  }
+  doc.save('MX_labels_presta94226_'+new Date().toISOString().split('T')[0]+'.pdf');
+  toast('Label PDF saved — open it and print at 100% / Actual Size');
+}
+
 async function printLabels(ids){
   const fmtKey = currentLabelFmt();
   const fmt = LABEL_FORMATS[fmtKey] || LABEL_FORMATS['8167'];
@@ -3067,6 +3136,7 @@ async function printLabels(ids){
     const n=Math.max(1, Math.min(fmt.total*20, parseInt(q,10)||def));
     const off=await averyPick(n, fmtKey);
     if(off===null) return;
+    if(fmtKey==='presta94226'){ await printPrestaPDF(Array.from({length:n},()=>({})), off, 'blank'); return; }
     await printHTML(buildLabelsHTML(Array.from({length:n},()=>({})), off, fmtKey, 'blank'));
     return;
   }
@@ -3077,6 +3147,7 @@ async function printLabels(ids){
   }
   const off=await averyPick(chosen.length, fmtKey);
   if(off===null) return;
+  if(fmtKey==='presta94226'){ await printPrestaPDF(chosen, off, mode); return; }
   await printHTML(buildLabelsHTML(chosen, off, fmtKey, mode));
 }
 
